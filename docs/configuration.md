@@ -66,6 +66,14 @@ Colours are `"#rrggbb"` or `"#rrggbbaa"`.
 
 
 
+### `[highlight]`
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `colors` | `{ b = "#74c0fc", g = "#8ce99a", o = "#ffc078", p = "#f783ac", r = "#ff8787", y = "#ffe066" }` | Highlight colours by letter: `a<letter>` in visual mode uses that colour. Any lowercase letters except `a` (which repeats the last colour). |
+| `default` | `"y"` | Colour used by `c` (comment) and the first `aa`. |
+| `author` | `""` | Author name written into new annotations; empty means your login name. |
+
 ## Key bindings
 
 ```toml
@@ -121,6 +129,9 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `search_next [n]`, `search_prev [n]` | `n`, `N` |
 | `hints`, `hints_copy` | `f`, `yf` |
 | `visual`, `visual_line` | `v`, `V` (also in visual mode: switch or leave) |
+| `toggle_annotations` | `<C-a>` |
+| `undo` | `u` (normal and visual mode) |
+| `write [path]` | — (`:w`, `:w <path>`) |
 | `word_hints` | `gv` |
 | `jump_back [n]`, `jump_forward [n]` | `<C-o>`, `<C-i>` |
 | `set_mark [letter]`, `goto_mark [letter]` | `m`, `'` and `` ` `` (without a letter they wait for the next key) |
@@ -147,4 +158,6 @@ Visual mode only:
 | `swap_ends` | `o` |
 | `yank` | `y`, `Cmd+C` |
 | `search_selection` | `*` |
+| `highlight [letter]` | `a` (without a letter it waits for one; `a` = last colour) |
+| `comment` | `c` |
 | also: `half_page_down/up`, `screen_down/up`, `search_prompt`, `search_next/prev`, `command_line`, `toggle_help`, `cancel` | `<C-d>` `<C-u>` `<C-f>` `<C-b>` `/` `n` `N` `:` `?` `<Esc>` |

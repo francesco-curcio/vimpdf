@@ -69,6 +69,38 @@ pub enum Command {
     WordHints,
     /// Copy this text (context menu: link address).
     CopyText(String),
+    /// Wait for a colour letter, then highlight the selection (`a`).
+    AwaitHighlight,
+    /// Highlight the selection in the colour with this letter (`None`: the
+    /// last colour used).
+    Highlight(Option<char>),
+    /// Highlight the selection and write a comment on it.
+    Comment,
+    /// Undo the last annotation change.
+    Undo,
+    /// The annotations panel.
+    ToggleAnnotations,
+    /// Edit / recolour / delete an annotation (context menu, panel).
+    EditComment {
+        page: usize,
+        xref: i32,
+    },
+    RecolorAnnot {
+        page: usize,
+        xref: i32,
+        letter: char,
+    },
+    DeleteAnnot {
+        page: usize,
+        xref: i32,
+    },
+    /// Save annotations: into the file (`None`) or a copy.
+    Write(Option<PathBuf>),
+    WriteQuit,
+    /// Quit even with unsaved annotations.
+    ForceQuit,
+    /// Reload, discarding unsaved annotations.
+    Revert,
     /// Open the `:` command line, optionally prefilled.
     EnterCommandLine(String),
     /// Open the `/` search line, optionally prefilled.
@@ -137,6 +169,11 @@ const SIMPLE: &[(&str, Command)] = &[
     ("yank", Command::Yank),
     ("search_selection", Command::SearchSelection),
     ("word_hints", Command::WordHints),
+    ("highlight", Command::AwaitHighlight),
+    ("comment", Command::Comment),
+    ("undo", Command::Undo),
+    ("toggle_annotations", Command::ToggleAnnotations),
+    ("write", Command::Write(None)),
     ("set_mark", Command::AwaitMark { set: true }),
     ("goto_mark", Command::AwaitMark { set: false }),
     ("toggle_statusbar", Command::ToggleStatusbar),
@@ -215,6 +252,10 @@ impl Command {
             }
         };
         match (name, arg) {
+            ("highlight", Some(a)) => {
+                return mark_letter(a).map(|c| Command::Highlight((c != 'a').then_some(c)));
+            }
+            ("write", Some(a)) => return Ok(Command::Write(Some(expand_tilde(a)))),
             ("set_mark", Some(a)) => return mark_letter(a).map(Command::SetMark),
             ("goto_mark", Some(a)) => return mark_letter(a).map(Command::GotoMark),
             _ => {}
@@ -263,6 +304,8 @@ impl Command {
             Command::EnterSearch(s) => format!("search_prompt {s}"),
             Command::Search(s) => format!("search {s}"),
             Command::SetMark(c) => format!("set_mark {c}"),
+            Command::Highlight(Some(c)) => format!("highlight {c}"),
+            Command::Highlight(None) => "highlight a".into(),
             Command::Move(m, 1) => m.name().to_owned(),
             Command::Move(m, n) => format!("{} {n}", m.name()),
             Command::GotoMark(c) => format!("goto_mark {c}"),
@@ -297,7 +340,13 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
         None => (line, ""),
     };
     let cmd = match word {
-        "q" | "q!" | "quit" | "qa" | "x" => Command::Quit,
+        "q" | "quit" | "qa" => Command::Quit,
+        "q!" | "quit!" | "qa!" => Command::ForceQuit,
+        "w" | "write" if rest.is_empty() => Command::Write(None),
+        "w" | "write" => Command::Write(Some(expand_tilde(rest))),
+        "wq" | "x" | "xit" => Command::WriteQuit,
+        "e!" | "edit!" if rest.is_empty() => Command::Revert,
+        "annotations" | "ann" => Command::ToggleAnnotations,
         "o" | "open" | "e" | "edit" if rest.is_empty() => {
             return Err(format!(":{word} needs a file path"));
         }
@@ -400,6 +449,19 @@ mod tests {
         assert_eq!(parse_ex(""), Ok(None));
         assert_eq!(parse_ex(":12"), Ok(Some(Command::GotoPage(12))));
         assert_eq!(parse_ex("q"), Ok(Some(Command::Quit)));
+        assert_eq!(parse_ex("q!"), Ok(Some(Command::ForceQuit)));
+        assert_eq!(parse_ex("w"), Ok(Some(Command::Write(None))));
+        assert_eq!(
+            parse_ex("w /tmp/copy.pdf"),
+            Ok(Some(Command::Write(Some("/tmp/copy.pdf".into()))))
+        );
+        assert_eq!(parse_ex("wq"), Ok(Some(Command::WriteQuit)));
+        assert_eq!(parse_ex("e!"), Ok(Some(Command::Revert)));
+        assert_eq!(
+            Command::parse("highlight g"),
+            Ok(Command::Highlight(Some('g')))
+        );
+        assert_eq!(Command::parse("highlight a"), Ok(Command::Highlight(None)));
         assert_eq!(parse_ex("source"), Ok(Some(Command::Source)));
         assert_eq!(
             parse_ex("open /tmp/a.pdf"),

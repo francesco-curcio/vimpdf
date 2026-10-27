@@ -227,6 +227,8 @@ impl Keymap {
             ("v", Visual { linewise: false }),
             ("V", Visual { linewise: true }),
             ("gv", WordHints),
+            ("u", Undo),
+            ("<C-a>", ToggleAnnotations),
         ] {
             k.bind(seq, cmd);
         }
@@ -256,6 +258,9 @@ impl Keymap {
             ("}", Move(M::BlockForward, 1)),
             ("{", Move(M::BlockBackward, 1)),
             ("o", SwapEnds),
+            ("a", AwaitHighlight),
+            ("c", Comment),
+            ("u", Undo),
             ("v", Visual { linewise: false }),
             ("V", Visual { linewise: true }),
             ("y", Yank),
@@ -284,20 +289,31 @@ impl Keymap {
 pub struct KeyState {
     count: Count,
     pending: KeySeq,
-    /// After `m` / `'`: the next key names a mark.
-    awaiting_mark: Option<(bool, String)>,
+    /// After `m` / `'` / `a`: the next key names a mark or a colour.
+    awaiting: Option<(Await, String)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Await {
+    SetMark,
+    GotoMark,
+    Highlight,
 }
 
 impl KeyState {
     /// Feed one key token. Returns a command once a binding is complete.
     pub fn feed(&mut self, key: &str, keymap: &Keymap) -> Option<Command> {
-        if let Some((set, _)) = self.awaiting_mark.take() {
+        if let Some((what, _)) = self.awaiting.take() {
             let mut chars = key.chars();
-            return match (chars.next(), chars.next()) {
-                (Some(c), None) if set => Some(Command::SetMark(c)),
-                (Some(c), None) => Some(Command::GotoMark(c)),
-                _ => None, // Esc or a special key cancels
+            let Some(c) = chars.next().filter(|_| chars.next().is_none()) else {
+                return None; // Esc or a special key cancels
             };
+            return Some(match what {
+                Await::SetMark => Command::SetMark(c),
+                Await::GotoMark => Command::GotoMark(c),
+                Await::Highlight if c == 'a' => Command::Highlight(None),
+                Await::Highlight => Command::Highlight(Some(c)),
+            });
         }
         if self.pending.is_empty() && self.count.feed(key) {
             return None;
@@ -310,8 +326,13 @@ impl KeyState {
         self.pending.push(key.to_owned());
         match keymap.lookup(&self.pending) {
             Lookup::Prefix => None,
-            Lookup::Exact(Command::AwaitMark { set }) => {
-                self.awaiting_mark = Some((*set, self.pending.concat()));
+            Lookup::Exact(cmd @ (Command::AwaitMark { .. } | Command::AwaitHighlight)) => {
+                let what = match cmd {
+                    Command::AwaitMark { set: true } => Await::SetMark,
+                    Command::AwaitMark { set: false } => Await::GotoMark,
+                    _ => Await::Highlight,
+                };
+                self.awaiting = Some((what, self.pending.concat()));
                 self.count.clear();
                 self.pending.clear();
                 None
@@ -336,7 +357,7 @@ impl KeyState {
     pub fn pending_display(&self) -> String {
         let count = self.count.get().map(|n| n.to_string()).unwrap_or_default();
         let mark = self
-            .awaiting_mark
+            .awaiting
             .as_ref()
             .map(|(_, k)| k.as_str())
             .unwrap_or("");
@@ -344,13 +365,13 @@ impl KeyState {
     }
 
     pub fn is_pending(&self) -> bool {
-        self.count.get().is_some() || !self.pending.is_empty() || self.awaiting_mark.is_some()
+        self.count.get().is_some() || !self.pending.is_empty() || self.awaiting.is_some()
     }
 
     pub fn reset(&mut self) {
         self.count.clear();
         self.pending.clear();
-        self.awaiting_mark = None;
+        self.awaiting = None;
     }
 }
 
@@ -425,6 +446,26 @@ mod tests {
         assert_eq!(
             feed_all(&mut st, &km, &["m", "<Esc>", "j"]),
             vec![Command::ScrollDown(1)]
+        );
+    }
+
+    #[test]
+    fn highlight_takes_a_colour_letter() {
+        let km = Keymap::default_visual();
+        let mut st = KeyState::default();
+        assert_eq!(feed_all(&mut st, &km, &["a"]), vec![]);
+        assert_eq!(st.pending_display(), "a");
+        assert_eq!(
+            feed_all(&mut st, &km, &["g"]),
+            vec![Command::Highlight(Some('g'))]
+        );
+        assert_eq!(
+            feed_all(&mut st, &km, &["a", "a"]),
+            vec![Command::Highlight(None)]
+        );
+        assert_eq!(
+            feed_all(&mut st, &km, &["a", "<Esc>", "c"]),
+            vec![Command::Comment]
         );
     }
 

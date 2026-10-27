@@ -72,6 +72,7 @@ struct Region {
 /// `reverse`, so the nearest page comes first while scrolling up).
 fn tiles_in(
     layout: &Layout,
+    generations: &[u32],
     scale: ScaleKey,
     recolor: Option<Recolor>,
     region: Region,
@@ -98,6 +99,7 @@ fn tiles_in(
         }
         jobs.extend(tiles.into_iter().map(|tile| RenderJob {
             page,
+            generation: generations.get(page).copied().unwrap_or(0),
             scale,
             recolor,
             tile,
@@ -110,6 +112,7 @@ fn tiles_in(
 /// Tiles visible in `vp`, in drawing order.
 pub fn visible_tiles(
     layout: &Layout,
+    generations: &[u32],
     vp: &Viewport,
     scale: ScaleKey,
     recolor: Option<Recolor>,
@@ -120,13 +123,14 @@ pub fn visible_tiles(
         x1: vp.x + vp.doc_width(),
         y1: vp.y + vp.doc_height(),
     };
-    tiles_in(layout, scale, recolor, view, false)
+    tiles_in(layout, generations, scale, recolor, view, false)
 }
 
 /// Everything worth rendering, highest priority first: the visible tiles,
 /// then a margin to the sides, then ahead in the scroll direction, then behind.
 pub fn plan(
     layout: &Layout,
+    generations: &[u32],
     vp: &Viewport,
     scale: ScaleKey,
     recolor: Option<Recolor>,
@@ -149,18 +153,26 @@ pub fn plan(
         y1: top,
     };
 
-    let mut jobs = visible_tiles(layout, vp, scale, recolor);
+    let mut jobs = visible_tiles(layout, generations, vp, scale, recolor);
     let sides = Region {
         x0,
         y0: top,
         x1,
         y1: bottom,
     };
-    jobs.extend(tiles_in(layout, scale, recolor, sides, false));
+    jobs.extend(tiles_in(layout, generations, scale, recolor, sides, false));
     if scrolling_up {
-        jobs.extend(tiles_in(layout, scale, recolor, above(AHEAD_SCREENS), true));
         jobs.extend(tiles_in(
             layout,
+            generations,
+            scale,
+            recolor,
+            above(AHEAD_SCREENS),
+            true,
+        ));
+        jobs.extend(tiles_in(
+            layout,
+            generations,
             scale,
             recolor,
             below(BEHIND_SCREENS),
@@ -169,6 +181,7 @@ pub fn plan(
     } else {
         jobs.extend(tiles_in(
             layout,
+            generations,
             scale,
             recolor,
             below(AHEAD_SCREENS),
@@ -176,6 +189,7 @@ pub fn plan(
         ));
         jobs.extend(tiles_in(
             layout,
+            generations,
             scale,
             recolor,
             above(BEHIND_SCREENS),
@@ -244,15 +258,15 @@ mod tests {
         vp.goto_page(&layout, 3);
 
         let scale = ScaleKey::from_scale(2.0);
-        let visible = visible_tiles(&layout, &vp, scale, None);
+        let visible = visible_tiles(&layout, &[], &vp, scale, None);
         assert!(visible.iter().all(|j| j.page == 3));
 
-        let down = plan(&layout, &vp, scale, None, false);
+        let down = plan(&layout, &[], &vp, scale, None, false);
         assert_eq!(&down[..visible.len()], &visible[..]);
         let first_other = down.iter().find(|j| j.page != 3).unwrap();
         assert_eq!(first_other.page, 4, "scrolling down prefetches below first");
 
-        let up = plan(&layout, &vp, scale, None, true);
+        let up = plan(&layout, &[], &vp, scale, None, true);
         let first_other = up.iter().find(|j| j.page != 3).unwrap();
         assert_eq!(first_other.page, 2, "scrolling up prefetches above first");
 

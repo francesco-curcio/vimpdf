@@ -153,6 +153,24 @@ Without a document pdfv opens `welcome.rs`'s generated one-page PDF.
 `scripts/bundle-macos.sh` builds the `.app` with an `Info.plist` declaring
 `com.adobe.pdf` as a viewable document type.
 
+## Annotations
+
+`annotate.rs` runs an editor thread with a writable `mupdf::pdf::PdfDocument`
+of the open file. The UI sends `EditRequest`s (create a highlight/comment/
+redaction mark, set contents or colour, delete, undo, save); the editor applies
+them, keeps an undo stack of inverse operations (with a remap of object numbers
+for annotations recreated by undo), and after each change writes the whole
+document to a new working-copy file in a temp directory. The UI then calls
+`DocView::content_changed`: the render workers reopen the working copy and the
+changed pages' *generation* is bumped. The generation is part of the tile key,
+so old tiles of those pages remain the fallback until the new ones arrive (no
+flash), and other pages' tiles stay valid. `:w` saves into the original file
+incrementally (append-only); the file's size and time are remembered so the
+watcher doesn't reload pdfv's own save. `app/annotations.rs` holds the UI side:
+selection → rectangles per page, the comment editor (`ui/comment.rs`), the
+panel (`ui/annotations.rs`), markers and hover tooltips, the quit/reload
+guards.
+
 ## Config
 
 `config.rs`: every option goes through `Config::set(key, toml::Value)`, used
@@ -181,6 +199,8 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `app/reading.rs` | Recolor, outline keys, state save/restore, auto-reload |
 | `ui/outline.rs` | Outline panel |
 | `platform.rs` | Files opened from the system (macOS `application:openURLs:`) |
+| `annotate.rs` | Annotation editor thread: highlights, comments, redaction marks, undo, saving |
+| `app/annotations.rs`, `ui/annotations.rs`, `ui/comment.rs` | Annotations UI |
 | `welcome.rs` | The page shown when no document is open |
 | `scripts/` | App bundle and icon generation (macOS) |
 | `selection.rs` | Text positions, caret motions, selections, clean copying |

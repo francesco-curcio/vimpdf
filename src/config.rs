@@ -76,6 +76,12 @@ pub struct Config {
     pub pan_modifier: Modifier,
     pub zoom_modifier: Modifier,
     pub copy_on_select: bool,
+    /// Highlight colours by letter (`a<letter>` in visual mode), in order.
+    pub highlight_colors: Vec<(char, Color)>,
+    /// Letter of the colour used by `c` (comment) and the first `aa`.
+    pub highlight_default: char,
+    /// Author written into new annotations; empty means the login name.
+    pub author: String,
     /// Key binding overrides, in file order.
     pub normal_keys: Vec<(String, String)>,
     pub visual_keys: Vec<(String, String)>,
@@ -109,6 +115,20 @@ impl Default for Config {
             pan_modifier: Modifier::Alt,
             zoom_modifier: Modifier::Cmd,
             copy_on_select: false,
+            // Sorted by letter, like a palette read from the config file.
+            highlight_colors: [
+                ('b', "#74c0fc"),
+                ('g', "#8ce99a"),
+                ('o', "#ffc078"),
+                ('p', "#f783ac"),
+                ('r', "#ff8787"),
+                ('y', "#ffe066"),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k, c(v)))
+            .collect(),
+            highlight_default: 'y',
+            author: String::new(),
             normal_keys: Vec::new(),
             visual_keys: Vec::new(),
         }
@@ -139,6 +159,9 @@ pub const OPTIONS: &[&str] = &[
     "mouse.pan_modifier",
     "mouse.zoom_modifier",
     "mouse.copy_on_select",
+    "highlight.colors",
+    "highlight.default",
+    "highlight.author",
 ];
 
 fn as_bool(v: &Value) -> Result<bool, String> {
@@ -181,6 +204,24 @@ fn as_modifier(v: &Value) -> Result<Modifier, String> {
 }
 
 impl Config {
+    /// The colour for a highlight letter.
+    pub fn highlight_color(&self, letter: char) -> Option<Color> {
+        self.highlight_colors
+            .iter()
+            .find(|(k, _)| *k == letter)
+            .map(|(_, c)| *c)
+    }
+
+    /// The author name for new annotations.
+    pub fn author_name(&self) -> String {
+        if !self.author.is_empty() {
+            return self.author.clone();
+        }
+        std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "pdfv".into())
+    }
+
     /// `$XDG_CONFIG_HOME/pdfv/config.toml`, else `~/.config/pdfv/config.toml`
     /// (also on macOS, to live next to other dotfiles).
     pub fn default_path() -> Option<PathBuf> {
@@ -305,6 +346,38 @@ impl Config {
             "mouse.pan_modifier" => self.pan_modifier = as_modifier(v)?,
             "mouse.zoom_modifier" => self.zoom_modifier = as_modifier(v)?,
             "mouse.copy_on_select" => self.copy_on_select = as_bool(v)?,
+            "highlight.colors" => {
+                let table = v.as_table().ok_or_else(|| {
+                    format!("expected a table like {{ y = \"#ffe066\" }}, got {v}")
+                })?;
+                let mut colors = Vec::new();
+                for (k, v) in table {
+                    let mut chars = k.chars();
+                    let letter = match (chars.next(), chars.next()) {
+                        (Some(c), None) if c.is_ascii_lowercase() && c != 'a' => c,
+                        _ => {
+                            return Err(format!(
+                                "'{k}' should be one lowercase letter other than 'a'"
+                            ));
+                        }
+                    };
+                    colors.push((letter, as_color(v)?));
+                }
+                colors.sort_by_key(|(k, _)| *k);
+                if colors.is_empty() {
+                    return Err("at least one colour is needed".into());
+                }
+                self.highlight_colors = colors;
+            }
+            "highlight.default" => {
+                let s = as_str(v)?;
+                let mut chars = s.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(c), None) => self.highlight_default = c,
+                    _ => return Err(format!("expected one letter, got \"{s}\"")),
+                }
+            }
+            "highlight.author" => self.author = as_str(v)?.to_owned(),
             _ => return Err("unknown option".into()),
         }
         Ok(())
@@ -486,6 +559,27 @@ caret = "red"
         let (c, w) = Config::from_toml(text);
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(c, Config::default());
+    }
+
+    #[test]
+    fn highlight_palette() {
+        let (c, w) = Config::from_toml(
+            r##"
+[highlight]
+colors = { y = "#ffff00", x = "#123456" }
+default = "x"
+author = "Me"
+"##,
+        );
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(c.highlight_color('x'), Some(Color([0x12, 0x34, 0x56, 255])));
+        assert_eq!(c.highlight_color('g'), None);
+        assert_eq!(c.highlight_default, 'x');
+        assert_eq!(c.author_name(), "Me");
+
+        let (c, w) = Config::from_toml("[highlight]\ncolors = { a = \"#ffffff\" }");
+        assert_eq!(w.len(), 1, "'a' is reserved for the last colour");
+        assert_eq!(c.highlight_colors.len(), 6);
     }
 
     #[test]

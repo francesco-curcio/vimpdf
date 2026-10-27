@@ -390,7 +390,9 @@ viewers (Preview, Acrobat, Zotero) show them too.
   (default yellow `y`, green `g`, blue `b`, pink `p`, red `r`, orange `o`);
   `aa` uses the last colour.
 - Comments: `c` in visual mode highlights and opens a comment editor (multi-line;
-  `<C-s>`/`Cmd+Enter` saves, `Esc` cancels). Highlights with a comment get a
+  Enter saves, Shift+Enter starts a new line, `Esc` cancels — modifier
+  shortcuts don't reliably reach a focused text field on macOS, and Cmd+Enter
+  is the user's global terminal shortcut). Highlights with a comment get a
   small marker; hovering shows the comment.
 - Annotations panel (`<C-a>` / `:annotations`): every highlight, comment and
   redaction mark in the document with page, colour, text and comment; `j`/`k`,
@@ -407,6 +409,7 @@ viewers (Preview, Acrobat, Zotero) show them too.
   (keyboard only, and with the mouse) are saved with `:w`, survive reopening,
   and the PDF's annotations are listed with the right colours and comment by
   MuPDF on re-read.
+- **Status:** done. Keyboard: three highlights in three colours and a two-line comment, `:w` (incremental: the original bytes are unchanged), `q` refused before saving; re-read by MuPDF with the right colours and comment; reopening loads them. Mouse: drag + right-click → Comment…, right-click → Delete, `u` undo. Fixed along the way: macOS replays file events from before a file is opened, so auto-reload now compares the file's size and time.
 
 ### M10 — Redaction (censoring)
 

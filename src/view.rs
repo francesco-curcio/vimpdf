@@ -12,6 +12,7 @@ use eframe::egui::{
     self, Align2, Color32, FontId, Pos2, Rect, TextureHandle, TextureOptions, Vec2,
 };
 
+use crate::annotate::Editor;
 use crate::document::{DocInfo, OutlineItem};
 use crate::layout::Layout;
 use crate::links::{self, PageLink};
@@ -44,24 +45,28 @@ pub struct DocView {
     pub outline: Vec<OutlineItem>,
     links_rx: Receiver<links::Navigation>,
     pub searcher: Searcher,
+    /// Annotation edits (highlights, comments, redaction marks).
+    pub editor: Editor,
     pub search: SearchState,
     /// Page text loaded so far (for selection and hit-testing).
     texts: HashMap<usize, Arc<PageText>>,
     texts_requested: HashSet<usize>,
+    /// Per page, bumped when an annotation edit changes it.
+    generations: Vec<u32>,
 }
 
 impl DocView {
     /// Open `path`: reads page sizes here, starts render workers and the
     /// link loader in the background.
-    pub fn open(ctx: &egui::Context, path: &Path) -> Result<Self> {
+    pub fn open(ctx: &egui::Context, path: &Path, author: String) -> Result<Self> {
         let path = std::fs::canonicalize(path)
             .with_context(|| format!("cannot open '{}'", path.display()))?;
         let info = DocInfo::load(&path)?;
-        Ok(Self::with_info(ctx, path, info))
+        Ok(Self::with_info(ctx, path, info, author))
     }
 
     /// Like `open`, with page sizes already loaded (and `path` canonical).
-    pub fn with_info(ctx: &egui::Context, path: PathBuf, info: DocInfo) -> Self {
+    pub fn with_info(ctx: &egui::Context, path: PathBuf, info: DocInfo, author: String) -> Self {
         tracing::info!(path = %path.display(), pages = info.page_count(), "opened document");
 
         let workers = thread_count();
@@ -71,6 +76,8 @@ impl DocView {
         let links_rx = links::spawn_loader(path.clone(), move || wake.request_repaint());
         let wake = ctx.clone();
         let searcher = Searcher::spawn(path.clone(), move || wake.request_repaint());
+        let wake = ctx.clone();
+        let editor = Editor::spawn(path.clone(), author, move || wake.request_repaint());
 
         Self {
             layout: Layout::new(&info.page_sizes, PAGE_GAP),
@@ -84,9 +91,11 @@ impl DocView {
             scale: None,
             links_rx,
             searcher,
+            editor,
             search: SearchState::default(),
             texts: HashMap::new(),
             texts_requested: HashSet::new(),
+            generations: vec![0; info.page_count()],
         }
     }
 
@@ -95,6 +104,18 @@ impl DocView {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default()
+    }
+
+    /// Render from `path` (a working copy with edits) and re-render `pages`.
+    /// Their old tiles stay on screen until the new ones arrive.
+    pub fn content_changed(&mut self, path: PathBuf, pages: &[usize]) {
+        self.renderer.set_source(path);
+        for &p in pages {
+            if let Some(g) = self.generations.get_mut(p) {
+                *g += 1;
+            }
+        }
+        self.last_queue.clear();
     }
 
     pub fn add_text(&mut self, page: usize, text: Arc<PageText>) {
@@ -174,10 +195,17 @@ impl DocView {
             ctx.request_repaint_after(RERENDER_DELAY - since);
             Vec::new()
         } else {
-            tiles::plan(&self.layout, vp, scale, recolor, scrolling_up)
-                .into_iter()
-                .filter(|j| !self.textures.contains(j) && !self.failed.contains(j))
-                .collect()
+            tiles::plan(
+                &self.layout,
+                &self.generations,
+                vp,
+                scale,
+                recolor,
+                scrolling_up,
+            )
+            .into_iter()
+            .filter(|j| !self.textures.contains(j) && !self.failed.contains(j))
+            .collect()
         };
         if jobs != self.last_queue {
             self.renderer.set_queue(jobs.iter().copied());
@@ -196,7 +224,7 @@ impl DocView {
     ) {
         let ppp = painter.ctx().pixels_per_point();
         let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-        let visible = tiles::visible_tiles(&self.layout, vp, scale, recolor);
+        let visible = tiles::visible_tiles(&self.layout, &self.generations, vp, scale, recolor);
 
         for page in self.layout.pages_in(vp.y, vp.y + vp.doc_height()) {
             let r = self.layout.page(page);
@@ -213,12 +241,21 @@ impl DocView {
             // Until all sharp tiles are in, draw the nearest other scale
             // stretched underneath.
             let mut drew_any = false;
-            if !complete && let Some((other, other_rc)) = self.fallback(page, scale, recolor) {
+            let generation = self.generations[page];
+            if !complete
+                && let Some((other, other_rc, other_gen)) =
+                    self.fallback(page, generation, scale, recolor)
+            {
                 let ratio = vp.zoom / other.scale();
                 let keys: Vec<RenderJob> = self
                     .textures
                     .keys()
-                    .filter(|k| k.page == page && k.scale == other && k.recolor == other_rc)
+                    .filter(|k| {
+                        k.page == page
+                            && k.scale == other
+                            && k.recolor == other_rc
+                            && k.generation == other_gen
+                    })
                     .copied()
                     .collect();
                 for key in keys {
@@ -266,14 +303,17 @@ impl DocView {
     fn fallback(
         &self,
         page: usize,
+        generation: u32,
         scale: ScaleKey,
         recolor: Option<Recolor>,
-    ) -> Option<(ScaleKey, Option<Recolor>)> {
+    ) -> Option<(ScaleKey, Option<Recolor>, u32)> {
         self.textures
             .keys()
-            .filter(|k| k.page == page && (k.scale, k.recolor) != (scale, recolor))
-            .map(|k| (k.scale, k.recolor))
-            .min_by_key(|(s, rc)| (*rc != recolor, s.distance(scale)))
+            .filter(|k| {
+                k.page == page && (k.scale, k.recolor, k.generation) != (scale, recolor, generation)
+            })
+            .map(|k| (k.scale, k.recolor, k.generation))
+            .min_by_key(|(s, rc, g)| (*rc != recolor, s.distance(scale), *g != generation))
     }
 }
 

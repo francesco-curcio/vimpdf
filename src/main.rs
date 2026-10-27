@@ -1,3 +1,4 @@
+mod annotate;
 mod app;
 mod config;
 mod document;

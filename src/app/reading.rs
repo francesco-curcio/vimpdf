@@ -6,6 +6,11 @@ use crate::render::Recolor;
 use crate::state::{self, FileState};
 use crate::watch::FileWatcher;
 
+pub(super) fn file_stamp(path: &std::path::Path) -> Option<(u64, std::time::SystemTime)> {
+    let m = std::fs::metadata(path).ok()?;
+    Some((m.len(), m.modified().ok()?))
+}
+
 /// Wait this long after the last change on disk before reloading, so a
 /// file still being written (LaTeX) is read once it's complete.
 const RELOAD_DELAY: Duration = Duration::from_millis(300);
@@ -25,6 +30,10 @@ pub(super) struct OutlineState {
 #[derive(Default)]
 pub(super) struct Persistence {
     watcher: Option<FileWatcher>,
+    /// Size and modification time of the file as we last read or wrote it:
+    /// change events that don't change it (pdfv's own saves, events macOS
+    /// replays from before the file was opened) are ignored.
+    stamp: Option<(u64, std::time::SystemTime)>,
     reload_due: Option<Instant>,
     last_saved: Option<(Instant, FileState)>,
 }
@@ -165,8 +174,14 @@ impl PdfvApp {
 
     // --- Reloading ------------------------------------------------------
 
+    /// Remember the file's current size and time (after opening or saving).
+    pub(super) fn remember_file_stamp(&mut self) {
+        self.persist.stamp = file_stamp(&self.view.path);
+    }
+
     pub(super) fn watch_file(&mut self, ctx: &egui::Context) {
         self.persist.reload_due = None;
+        self.remember_file_stamp();
         if !self.config.auto_reload {
             self.persist.watcher = None;
             return;
@@ -198,7 +213,14 @@ impl PdfvApp {
         match self.persist.reload_due {
             Some(due) if Instant::now() >= due => {
                 self.persist.reload_due = None;
-                if self.view.path.exists() {
+                if file_stamp(&self.view.path) == self.persist.stamp {
+                    // Not really changed (our own `:w`, or a replayed event).
+                } else if self.annots.unsaved {
+                    self.error(
+                        "The file changed on disk, but you have unsaved annotations: \
+                         :w overwrites it, :e! discards your changes and reloads",
+                    );
+                } else if self.view.path.exists() {
                     self.open(ctx, self.view.path.clone(), true);
                 }
             }

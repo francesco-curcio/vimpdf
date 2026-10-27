@@ -1,7 +1,9 @@
 //! egui widgets around the document: status bar, command line, toolbar and
 //! the help overlay. They report user actions as `Command`s.
 
+pub mod annotations;
 pub mod cmdline;
+pub mod comment;
 pub mod fonts;
 pub mod help;
 pub mod outline;

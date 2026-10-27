@@ -24,6 +24,8 @@ pub(super) enum Drag {
 pub(super) struct ContextMenu {
     pos: Pos2,
     link: Option<LinkTarget>,
+    /// The annotation under the pointer: page, xref, kind.
+    annot: Option<(usize, i32, crate::annotate::AnnotKind)>,
 }
 
 impl PdfvApp {
@@ -388,7 +390,8 @@ impl PdfvApp {
                 )
                 .map(|l| l.target.clone())
             });
-            self.menu = Some(ContextMenu { pos, link });
+            let annot = self.annot_at(area, pos).map(|a| (a.page, a.xref, a.kind));
+            self.menu = Some(ContextMenu { pos, link, annot });
         }
 
         let cursor = match self.drag {
@@ -416,6 +419,13 @@ impl PdfvApp {
         let menu = self.menu.as_ref()?;
         let has_selection = self.selection.is_some();
         let link = menu.link.clone();
+        let annot = menu.annot;
+        let palette: Vec<(char, [u8; 3])> = self
+            .config
+            .highlight_colors
+            .iter()
+            .map(|(k, c)| (*k, [c.0[0], c.0[1], c.0[2]]))
+            .collect();
         let mut chosen = None;
         let response = egui::Area::new(egui::Id::unique("pdfv-context-menu"))
             .order(egui::Order::Foreground)
@@ -423,38 +433,73 @@ impl PdfvApp {
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_min_width(200.0);
-                    let mut item =
-                        |ui: &mut egui::Ui, label: &str, key: &str, on: bool, cmd: Command| {
-                            let text = format!("{label}\t{key}");
-                            if ui
-                                .add_enabled(on, egui::Button::new(text).frame(false))
-                                .clicked()
-                            {
-                                chosen = Some(cmd);
+                    let item = |ui: &mut egui::Ui, label: &str, key: &str, on: bool| {
+                        let r = ui.add_enabled(
+                            on,
+                            egui::Button::new(format!("{label}\t{key}")).frame(false),
+                        );
+                        r.clicked()
+                    };
+                    if item(ui, "Copy", "y", has_selection) {
+                        chosen = Some(Command::Yank);
+                    }
+                    if item(ui, "Search for selection", "*", has_selection) {
+                        chosen = Some(Command::SearchSelection);
+                    }
+                    if has_selection {
+                        ui.menu_button("Highlight", |ui| {
+                            for (letter, [r, g, b]) in &palette {
+                                let label =
+                                    egui::RichText::new(format!("■ colour {letter}\ta{letter}"))
+                                        .color(egui::Color32::from_rgb(*r, *g, *b));
+                                if ui.button(label).clicked() {
+                                    chosen = Some(Command::Highlight(Some(*letter)));
+                                }
                             }
-                        };
-                    item(ui, "Copy", "y", has_selection, Command::Yank);
-                    item(
-                        ui,
-                        "Search for selection",
-                        "*",
-                        has_selection,
-                        Command::SearchSelection,
-                    );
+                        });
+                        if item(ui, "Comment…", "c", true) {
+                            chosen = Some(Command::Comment);
+                        }
+                    }
+                    if let Some((page, xref, kind)) = annot {
+                        ui.separator();
+                        let name = kind.name();
+                        if item(ui, &format!("Edit {name} comment…"), "<C-a> e", true) {
+                            chosen = Some(Command::EditComment { page, xref });
+                        }
+                        if kind == crate::annotate::AnnotKind::Highlight {
+                            ui.menu_button("Change colour", |ui| {
+                                for (letter, [r, g, b]) in &palette {
+                                    let label = egui::RichText::new(format!(
+                                        "■ colour {letter}\t<C-a> c{letter}"
+                                    ))
+                                    .color(egui::Color32::from_rgb(*r, *g, *b));
+                                    if ui.button(label).clicked() {
+                                        chosen = Some(Command::RecolorAnnot {
+                                            page,
+                                            xref,
+                                            letter: *letter,
+                                        });
+                                    }
+                                }
+                            });
+                        }
+                        if item(ui, &format!("Delete {name}"), "<C-a> d", true) {
+                            chosen = Some(Command::DeleteAnnot { page, xref });
+                        }
+                    }
                     if let Some(target) = link {
                         ui.separator();
                         let address = match &target {
                             LinkTarget::External(uri) => uri.clone(),
                             LinkTarget::Internal { page, .. } => format!("page {}", page + 1),
                         };
-                        item(ui, "Open link", "f", true, Command::FollowLink(target));
-                        item(
-                            ui,
-                            "Copy link address",
-                            "yf",
-                            true,
-                            Command::CopyText(address),
-                        );
+                        if item(ui, "Open link", "f", true) {
+                            chosen = Some(Command::FollowLink(target));
+                        }
+                        if item(ui, "Copy link address", "yf", true) {
+                            chosen = Some(Command::CopyText(address));
+                        }
                     }
                 });
             })

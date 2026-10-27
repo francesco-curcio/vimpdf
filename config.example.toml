@@ -34,6 +34,13 @@ drag = "select"         # "select" | "pan"
 pan_modifier = "alt"
 copy_on_select = false
 
+[highlight]
+# Highlight colours by letter: in visual mode, a<letter> highlights the
+# selection (aa repeats the last colour). 'a' itself is reserved.
+colors = { y = "#ffe066", g = "#8ce99a", b = "#74c0fc", p = "#f783ac", r = "#ff8787", o = "#ffc078" }
+default = "y"         # colour of c (comment) and of the first aa
+author = ""           # written into new annotations; empty = your login name
+
 [keys.normal]
 # Examples (not defaults):
 # "x" = "scroll_down 3"

@@ -12,6 +12,10 @@ pub enum Mode {
     Visual,
     /// The table of contents panel has the keyboard.
     Outline,
+    /// The annotations panel has the keyboard.
+    Annotations,
+    /// Writing a comment.
+    Comment,
 }
 
 impl Mode {
@@ -23,6 +27,8 @@ impl Mode {
             Mode::Hints => "HINTS",
             Mode::Visual => "VISUAL",
             Mode::Outline => "OUTLINE",
+            Mode::Annotations => "ANNOTATIONS",
+            Mode::Comment => "COMMENT",
         }
     }
 }

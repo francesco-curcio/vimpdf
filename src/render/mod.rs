@@ -61,6 +61,9 @@ pub fn recolor(rgb: &mut [u8], rc: Recolor) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RenderJob {
     pub page: usize,
+    /// Bumped when the page's content changes (an annotation edit), so old
+    /// tiles are told apart from new ones.
+    pub generation: u32,
     pub scale: ScaleKey,
     pub recolor: Option<Recolor>,
     pub tile: TileId,
@@ -103,6 +106,9 @@ impl Queue {
 struct Shared {
     queue: Mutex<Queue>,
     ready: Condvar,
+    /// The file to render, and a version bumped when it changes (the
+    /// working copy with unsaved annotations). Workers reopen on a change.
+    source: Mutex<(u32, PathBuf)>,
 }
 
 pub struct Renderer {
@@ -117,6 +123,7 @@ impl Renderer {
         let shared = Arc::new(Shared {
             queue: Mutex::new(Queue::default()),
             ready: Condvar::new(),
+            source: Mutex::new((0, path)),
         });
         let (tx, rx) = crossbeam_channel::unbounded();
         let wake = Arc::new(wake);
@@ -125,10 +132,9 @@ impl Renderer {
             let shared = Arc::clone(&shared);
             let tx = tx.clone();
             let wake = Arc::clone(&wake);
-            let path = path.clone();
             thread::Builder::new()
                 .name(format!("pdfv-render-{i}"))
-                .spawn(move || worker(path, shared, tx, move || wake()))
+                .spawn(move || worker(shared, tx, move || wake()))
                 .expect("failed to spawn render thread");
         }
 
@@ -136,6 +142,14 @@ impl Renderer {
             shared,
             results: rx,
         }
+    }
+
+    /// Render from `path` from now on. Jobs queued after this call see the
+    /// new file.
+    pub fn set_source(&self, path: PathBuf) {
+        let mut source = self.shared.source.lock().unwrap();
+        source.0 += 1;
+        source.1 = path;
     }
 
     /// Set the wanted jobs, highest priority first.
@@ -159,13 +173,19 @@ impl Drop for Renderer {
     }
 }
 
-fn worker(path: PathBuf, shared: Arc<Shared>, results: Sender<RenderResult>, wake: impl Fn()) {
-    let mut renderer = match document::PageRenderer::open(&path) {
-        Ok(r) => r,
-        Err(err) => {
-            tracing::error!("render worker cannot open document: {err:#}");
-            return;
+fn worker(shared: Arc<Shared>, results: Sender<RenderResult>, wake: impl Fn()) {
+    let open = |shared: &Shared| {
+        let (version, path) = shared.source.lock().unwrap().clone();
+        match document::PageRenderer::open(&path) {
+            Ok(r) => Some((version, r)),
+            Err(err) => {
+                tracing::error!("render worker cannot open {}: {err:#}", path.display());
+                None
+            }
         }
+    };
+    let Some((mut version, mut renderer)) = open(&shared) else {
+        return;
     };
 
     loop {
@@ -181,6 +201,12 @@ fn worker(path: PathBuf, shared: Arc<Shared>, results: Sender<RenderResult>, wak
                 q = shared.ready.wait(q).unwrap();
             }
         };
+
+        if shared.source.lock().unwrap().0 != version
+            && let Some((v, r)) = open(&shared)
+        {
+            (version, renderer) = (v, r);
+        }
 
         let start = std::time::Instant::now();
         let image = renderer
@@ -219,6 +245,7 @@ mod tests {
     fn job(page: usize) -> RenderJob {
         RenderJob {
             page,
+            generation: 0,
             scale: ScaleKey::from_scale(2.0),
             recolor: None,
             tile: TileId { col: 0, row: 0 },

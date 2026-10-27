@@ -20,11 +20,13 @@ use crate::ui::{self, fonts, help, statusbar};
 use crate::view::DocView;
 use crate::viewport::{FitMode, Viewport};
 
+mod annotations;
 mod hints;
 mod reading;
 mod searching;
 mod visual;
 
+use annotations::Annotations;
 use hints::HintState;
 use reading::{OutlineState, Persistence};
 use visual::{ContextMenu, Drag};
@@ -76,6 +78,7 @@ pub struct PdfvApp {
     menu: Option<ContextMenu>,
     outline: OutlineState,
     persist: Persistence,
+    annots: Annotations,
 }
 
 impl PdfvApp {
@@ -97,7 +100,7 @@ impl PdfvApp {
         warnings.extend(key_warnings);
 
         let mut app = Self {
-            view: DocView::with_info(ctx, path, info),
+            view: DocView::with_info(ctx, path, info, config.author_name()),
             viewport: None,
             config,
             config_path,
@@ -124,6 +127,7 @@ impl PdfvApp {
             menu: None,
             outline: OutlineState::default(),
             persist: Persistence::default(),
+            annots: Annotations::default(),
         };
         app.install_font(ctx, &mut warnings);
         app.watch_file(ctx);
@@ -202,7 +206,7 @@ impl PdfvApp {
         } else {
             path
         };
-        let view = match DocView::open(ctx, &path) {
+        let view = match DocView::open(ctx, &path, self.config.author_name()) {
             Ok(v) => v,
             Err(e) => return self.error(format!("{e:#}")),
         };
@@ -223,7 +227,9 @@ impl PdfvApp {
         if matches!(self.mode, Mode::Visual | Mode::Hints | Mode::Outline) {
             self.mode = Mode::Normal;
         }
-        if !same_file {
+        if same_file {
+            self.remember_file_stamp();
+        } else {
             self.watch_file(ctx);
         }
         let name = self.view.file_name();
@@ -441,8 +447,31 @@ impl PdfvApp {
                 let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
                 ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!full));
             }
-            Command::Reload => self.open(ctx, self.view.path.clone(), true),
-            Command::Open(path) => self.open(ctx, path, false),
+            Command::Reload => {
+                if !self.has_unsaved() {
+                    self.open(ctx, self.view.path.clone(), true);
+                }
+            }
+            Command::Revert => {
+                self.annots.unsaved = false;
+                self.open(ctx, self.view.path.clone(), true);
+            }
+            Command::Open(path) => {
+                if !self.has_unsaved() {
+                    self.open(ctx, path, false);
+                }
+            }
+            Command::AwaitHighlight => {} // handled by the key state
+            Command::Highlight(letter) => self.highlight(letter),
+            Command::Comment => self.comment_on_selection(),
+            Command::Undo => self.undo(),
+            Command::ToggleAnnotations => self.toggle_annotations(),
+            Command::EditComment { page, xref } => self.edit_comment(page, xref),
+            Command::RecolorAnnot { page, xref, letter } => self.recolor_annot(page, xref, letter),
+            Command::DeleteAnnot { page, xref } => self.delete_annot(page, xref),
+            Command::Write(path) => self.write(path),
+            Command::WriteQuit => self.write_quit(ctx),
+            Command::ForceQuit => self.force_quit(ctx),
             Command::Set { option, value } => match self.config.set_from_str(&option, &value) {
                 Ok(key) => {
                     let mut warnings = Vec::new();
@@ -476,7 +505,7 @@ impl PdfvApp {
                 ctx.copy_text(text.clone());
                 self.info(format!("Copied {text}"));
             }
-            Command::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
+            Command::Quit => self.quit(ctx),
             Command::ScrollDown(_)
             | Command::ScrollUp(_)
             | Command::ScrollLeft(_)
@@ -582,6 +611,13 @@ impl PdfvApp {
             return key_tokens(&events)
                 .iter()
                 .filter_map(|tok| self.outline_key(tok))
+                .collect();
+        }
+        if self.mode == Mode::Annotations {
+            let events = ctx.input(|i| i.events.clone());
+            return key_tokens(&events)
+                .iter()
+                .filter_map(|tok| self.annotations_key(tok))
                 .collect();
         }
         let visual = self.mode == Mode::Visual;
@@ -695,6 +731,8 @@ impl eframe::App for PdfvApp {
             self.restore_state();
         }
         self.check_reload(&ctx);
+        self.guard_close(&ctx);
+        self.receive_edits(&ctx);
         self.open_external_files(&ctx);
         if let Some(vp) = self.viewport.as_mut()
             && (vp.width, vp.height) != (area.width(), area.height())
@@ -778,6 +816,7 @@ impl eframe::App for PdfvApp {
         self.view
             .draw(&painter, area, &vp, scale, recolor, page_color);
         self.draw_search_highlights(&painter, area, &vp);
+        self.draw_annotation_markers(&ctx, &painter, area, &vp);
         self.draw_selection(&painter, area, &vp);
         self.draw_hints(&painter, area, &vp);
 
@@ -820,8 +859,11 @@ impl eframe::App for PdfvApp {
                     ui_commands.push(Command::Search(line));
                 }
             },
-            (Some(rect), Mode::Normal | Mode::Hints | Mode::Visual | Mode::Outline) => {
-                let file = self.view.file_name();
+            (Some(rect), _) => {
+                let mut file = self.view.file_name();
+                if self.annots.unsaved {
+                    file.push_str(" [+]");
+                }
                 let linewise = self.selection.is_some_and(|s| s.linewise);
                 let status = statusbar::Status {
                     mode: if self.mode == Mode::Visual && linewise {
@@ -868,6 +910,14 @@ impl eframe::App for PdfvApp {
             );
         }
         if let Some(cmd) = self.context_menu(&ctx) {
+            ui_commands.push(cmd);
+        }
+        if self.mode == Mode::Comment {
+            self.show_comment_editor(&ctx);
+        }
+        if self.mode == Mode::Annotations
+            && let Some(cmd) = self.show_annotations_panel(&ctx, area)
+        {
             ui_commands.push(cmd);
         }
         if self.mode == Mode::Outline {

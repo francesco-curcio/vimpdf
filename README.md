@@ -10,7 +10,8 @@ continuous scrolling, vim motions with counts, links, zoom and fit modes,
 status bar, `:` command line, config file, toolbar, help overlay, search,
 link hints, jumplist and marks, text selection with vim visual mode and the
 mouse, recolor (dark mode), outline panel, remembered positions, auto-reload,
-and a macOS app bundle that can be the default PDF viewer (Finder, Firefox).
+a macOS app bundle that can be the default PDF viewer (Finder, Firefox), and
+highlights and comments saved into the PDF.
 
 Documentation:
 
@@ -100,6 +101,8 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `''` | Back to where the last jump started |
 | `v` / `V` | Visual mode (select text) / visual-line mode — see below |
 | `gv` | Word hints: a label on every word on screen; typing one starts visual mode there |
+| `<C-a>` | Annotations panel (all highlights, comments and redaction marks) |
+| `u` | Undo the last annotation change |
 | `:` | Command line |
 | `?` | Help overlay: active keys, mouse actions, commands. Your scroll keys (`j`/`k`, `<C-d>`/`<C-u>`, `gg`/`G`, counts…) scroll it; `?`, `Esc` or `q` close it |
 | `<Tab>` | Outline (table of contents) panel |
@@ -123,7 +126,7 @@ Every mouse action also has a key.
 | Double / triple click | Select a word / a line | `gv` + label, `V` |
 | `Shift` + click | Extend the selection | motions in visual mode |
 | `Alt` + drag, middle drag | Pan | `h` `j` `k` `l` |
-| Right click | Menu: copy, search for selection, open link, copy link address | `y`, `*`, `f`, `yf` |
+| Right click | Menu: copy, search for selection, highlight, comment, open link, copy link address; on an annotation: edit comment, change colour, delete | `y`, `*`, `a<letter>`, `c`, `f`, `yf`; `<C-a>` then `e`, `c<letter>`, `d` |
 | Click the page number in the status bar | Go to page | `:<n>` |
 | Click an outline entry | Jump to it (panel stays open) | `<Tab>`, `j`/`k`, Enter |
 | Toolbar buttons | Zoom, fit, go to page, help | `+` `-` `s` `a` `:<n>` `?` |
@@ -153,7 +156,13 @@ cancels; Up / Down browse the history.
 | `:set <option> <value>` | Change an option for this session, e.g. `:set zoom.step 1.25`, `:set toolbar`, `:set notoolbar` |
 | `:source` | Reload the config file |
 | `:help` | Help overlay |
-| `:q` | Quit |
+| `:w` | Save annotations into the PDF |
+| `:w <path>` | Save a copy with the annotations |
+| `:wq`, `:x` | Save and quit |
+| `:q` | Quit (refused while there are unsaved annotations) |
+| `:q!` | Quit, discarding unsaved annotations |
+| `:e!` | Reload the file, discarding unsaved annotations |
+| `:annotations` | Annotations panel |
 | `:<command> [args]` | Any bindable command, e.g. `:zoom_in 3`, `:fit_page` |
 
 ### Search
@@ -209,6 +218,34 @@ Known limitations:
 - Mathematics usually copies poorly: many PDFs encode math glyphs in ways that
   don't map back to sensible characters (e.g. `410þ160 −180` for 410⁺¹⁶⁰₋₁₈₀).
 - Scanned PDFs without a text layer have nothing to select or search.
+
+### Highlights and comments
+
+Highlights and comments are standard PDF annotations, so Preview, Acrobat,
+Zotero and other viewers show them too.
+
+- Select text (`v` + motions, `/` then `v`, `gv`, or the mouse), then
+  `a<letter>` highlights it in that colour: `y` yellow, `g` green, `b` blue,
+  `p` pink, `r` red, `o` orange (configurable: `[highlight]` in the config).
+  `aa` uses the last colour again.
+- `c` on a selection opens a comment box: Enter saves (the selection is
+  highlighted with the comment), Shift+Enter starts a new line, Esc cancels.
+  A dot marks highlights that carry a comment; hover it to read the comment.
+- `<C-a>` opens the annotations panel: every annotation in document order with
+  its page, the text it covers and its comment. `j`/`k` move, Enter jumps to
+  it, `e` edits the comment, `c<letter>` changes the colour, `d` deletes, `u`
+  undoes, Esc closes.
+- With the mouse: right-click a selection for Highlight (with each colour)
+  and Comment…; right-click an annotation to edit its comment, change its
+  colour or delete it.
+- `u` undoes the last annotation change (repeatedly).
+- Changes are kept in memory until `:w`, which writes them into the PDF as an
+  incremental update (the original bytes stay unchanged; the update is
+  appended). The status bar shows `[+]` after the file name while there are
+  unsaved changes. `:q`, opening another file and reloading are refused until
+  you save (`:w`) or discard (`:q!`, `:e!`); closing the window warns once.
+- If the file changes on disk while you have unsaved annotations, pdfv
+  doesn't reload it but tells you; its own saves never trigger a reload.
 
 ### Reading comfort
 
