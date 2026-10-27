@@ -31,7 +31,8 @@ Deviations from sections 2–3:
   `state.rs`, `watch.rs`, `platform.rs`, `welcome.rs`, and `app.rs` is split
   into `app/hints.rs`, `app/searching.rs`, `app/visual.rs`, `app/reading.rs`.
 
-Not yet checked by a human: the visual appearance (bars, help, outline panel,
+Linux has not been built or tested (the README says so and lists the probable
+build dependencies as a best guess). Not yet checked by a human: the visual appearance (bars, help, outline panel,
 highlight colours, recolor), pinch-to-zoom on a real trackpad, and choosing
 vimpdf inside Firefox's settings. Known limitations are listed per milestone
 and in the README.

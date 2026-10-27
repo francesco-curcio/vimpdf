@@ -26,7 +26,7 @@ Documentation:
 
 ## Building
 
-Requirements (macOS):
+Requirements (macOS — the tested platform):
 
 - Xcode Command Line Tools (`xcode-select --install`), needed to compile MuPDF.
 - Rust stable via [rustup](https://rustup.rs/). On Apple Silicon make sure the
@@ -36,6 +36,32 @@ Requirements (macOS):
 ```fish
 cargo build --release
 ```
+
+### Linux (untested)
+
+vimpdf is developed and tested on macOS (Apple Silicon). It is written to be
+portable — macOS-only code is compiled only on macOS, links open with
+`xdg-open`, config and state follow the XDG directories, fonts are looked up
+in the usual Linux folders — but **it has not been built or run on Linux
+yet**. Reports and fixes are welcome.
+
+What it will most likely need (a best guess, not verified), on Debian/Ubuntu:
+
+```sh
+sudo apt install build-essential clang pkg-config libfontconfig-dev \
+    libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+```
+
+and on Fedora:
+
+```sh
+sudo dnf install gcc gcc-c++ clang pkgconf fontconfig-devel \
+    libxkbcommon-devel wayland-devel libX11-devel libXcursor-devel libXrandr-devel libXi-devel mesa-libGL-devel
+```
+
+then `cargo build --release` as above. The macOS app bundle and the Finder /
+Firefox integration are macOS-only; on Linux run `vimpdf file.pdf` or use a
+`.desktop` file.
 
 The first build compiles MuPDF from source and takes a minute or two.
 
