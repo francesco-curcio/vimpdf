@@ -108,6 +108,9 @@ impl PdfvApp {
     }
 
     pub(super) fn save_state(&mut self) {
+        if crate::welcome::is_welcome(&self.view.path) {
+            return;
+        }
         let (Some(dir), Some(state)) = (state::state_dir(), self.file_state()) else {
             return;
         };

@@ -68,9 +68,18 @@ pub fn pdf_bytes() -> Vec<u8> {
     out
 }
 
+fn path() -> PathBuf {
+    std::env::temp_dir().join("pdfv-welcome.pdf")
+}
+
+/// Whether `path` (canonical) is the welcome page.
+pub fn is_welcome(path: &std::path::Path) -> bool {
+    std::fs::canonicalize(self::path()).is_ok_and(|p| p == path)
+}
+
 /// Write the welcome page to a temporary file and return its path.
 pub fn write() -> Result<PathBuf> {
-    let path = std::env::temp_dir().join("pdfv-welcome.pdf");
+    let path = path();
     std::fs::write(&path, pdf_bytes())
         .with_context(|| format!("cannot write {}", path.display()))?;
     Ok(path)
