@@ -22,6 +22,8 @@ pub fn key_tokens(events: &[Event]) -> Vec<String> {
                         .map(|c| c.to_string()),
                 );
             }
+            // Cmd+C (Ctrl+C elsewhere) arrives as a copy event, not a key.
+            Event::Copy => out.push("<Copy>".to_owned()),
             Event::Key {
                 key,
                 pressed: true,

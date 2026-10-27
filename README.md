@@ -8,7 +8,8 @@ and UI use [egui/eframe](https://github.com/emilk/egui).
 Status: in development — see [PLAN.md](PLAN.md) for the roadmap. Done so far:
 continuous scrolling, vim motions with counts, links, zoom and fit modes,
 status bar, `:` command line, config file, toolbar, help overlay, search,
-link hints, jumplist and marks.
+link hints, jumplist and marks, text selection with vim visual mode and the
+mouse.
 
 Documentation:
 
@@ -72,6 +73,8 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `<C-o>` / `<C-i>` | Back / forward through the jump history |
 | `m<letter>` / `'<letter>` | Set a mark / jump to it (`` ` `` works like `'`) |
 | `''` | Back to where the last jump started |
+| `v` / `V` | Visual mode (select text) / visual-line mode — see below |
+| `gv` | Word hints: a label on every word on screen; typing one starts visual mode there |
 | `:` | Command line |
 | `?` | Help overlay: active keys, mouse actions, commands |
 | `<C-t>` | Toggle the toolbar |
@@ -89,6 +92,11 @@ Every mouse action also has a key.
 | Wheel / two-finger scroll | Scroll | `j` `k` `h` `l` |
 | Pinch, or `Cmd` + wheel | Zoom, anchored at the pointer | `+` `-` |
 | Click a link | Follow it | `f` + label |
+| Drag over text | Select it | `v` + motions |
+| Double / triple click | Select a word / a line | `gv` + label, `V` |
+| `Shift` + click | Extend the selection | motions in visual mode |
+| `Alt` + drag, middle drag | Pan | `h` `j` `k` `l` |
+| Right click | Menu: copy, search for selection, open link, copy link address | `y`, `*`, `f`, `yf` |
 | Click the page number in the status bar | Go to page | `:<n>` |
 | Toolbar buttons | Zoom, fit, go to page, help | `+` `-` `s` `a` `:<n>` `?` |
 
@@ -135,6 +143,44 @@ below the current position.
   `n` / `N` move between them; `Esc` hides the highlights until the next `n`.
 - The status bar shows `[match/total]`, with `searching…` while it runs.
 - Up / Down in the search line browse previous searches.
+
+### Selecting and copying text
+
+`v` starts visual mode with the caret at the current search match (so
+`/words` then `v` starts exactly there), or at the first line on screen. `gv`
+puts labels on the words on screen; type one to start there. `V` selects whole
+lines. Dragging with the mouse selects too, and a mouse selection continues in
+visual mode, so you can refine it from the keyboard (and vice versa with
+`Shift`+click).
+
+| Key (visual mode) | Action |
+| --- | --- |
+| `h` `l` / `j` `k` | Caret left / right, down / up a line (reading order) |
+| `w` `b` `e` | Next word, previous word, end of word |
+| `0` `^` / `$` | Start / end of line |
+| `}` / `{` | End / start of the paragraph |
+| `<C-d>` `<C-u>` `<C-f>` `<C-b>` | Scroll; the caret moves with the view |
+| `o` | Swap caret and anchor |
+| `v` / `V` | Switch char-wise / line-wise, or leave |
+| `y`, `Cmd+C` | Copy and leave visual mode |
+| `*` | Search for the selected text |
+| `/`, `n`, `N` | Search; the caret moves to the match |
+| `Esc` | Leave visual mode |
+
+Counts work (`3w`, `5j`). Copied text is cleaned up: lines of a paragraph are
+joined with spaces, words hyphenated at a line end are joined back
+(`multi-`/`leptonic` → `multileptonic`, while `TeV-`/`scale` keeps its
+hyphen), paragraphs are separated by newlines and ligatures are expanded
+(ﬁ → fi). Margin line numbers of draft copies are left out.
+
+Known limitations:
+
+- Reading order comes from MuPDF plus some layout heuristics (merging
+  fragments of a line, joining a paragraph that continues in the next column,
+  splitting paragraphs at indents). Unusual layouts can still jump around.
+- Mathematics usually copies poorly: many PDFs encode math glyphs in ways that
+  don't map back to sensible characters (e.g. `410þ160 −180` for 410⁺¹⁶⁰₋₁₈₀).
+- Scanned PDFs without a text layer have nothing to select or search.
 
 ### Status bar
 

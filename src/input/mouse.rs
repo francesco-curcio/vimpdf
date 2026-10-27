@@ -82,7 +82,12 @@ pub fn handle(
             .and_then(|p| link_at(p - view_rect.min.to_vec2(), viewport, layout, links))
     };
 
-    if clicked && let Some(link) = link_at(click_pos) {
+    // Shift+click extends a selection instead.
+    let shift = ctx.input(|i| i.modifiers.shift);
+    if clicked
+        && !shift
+        && let Some(link) = link_at(click_pos)
+    {
         commands.push(Command::FollowLink(link.target.clone()));
     }
 

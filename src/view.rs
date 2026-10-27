@@ -1,8 +1,9 @@
 //! Everything tied to one open document: layout, render workers, the tile
 //! texture cache and links. Replaced wholesale by `:open` and reload.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
@@ -18,6 +19,8 @@ use crate::render::cache::LruCache;
 use crate::render::tiles;
 use crate::render::{RenderJob, Renderer, ScaleKey};
 use crate::search::{SearchState, Searcher};
+use crate::selection::DocText;
+use crate::text::PageText;
 use crate::viewport::Viewport;
 
 const PLACEHOLDER_TEXT: Color32 = Color32::from_gray(160);
@@ -41,6 +44,9 @@ pub struct DocView {
     links_rx: Receiver<Vec<Vec<PageLink>>>,
     pub searcher: Searcher,
     pub search: SearchState,
+    /// Page text loaded so far (for selection and hit-testing).
+    texts: HashMap<usize, Arc<PageText>>,
+    texts_requested: HashSet<usize>,
 }
 
 impl DocView {
@@ -77,6 +83,8 @@ impl DocView {
             links_rx,
             searcher,
             search: SearchState::default(),
+            texts: HashMap::new(),
+            texts_requested: HashSet::new(),
         }
     }
 
@@ -85,6 +93,33 @@ impl DocView {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default()
+    }
+
+    pub fn add_text(&mut self, page: usize, text: Arc<PageText>) {
+        self.texts.insert(page, text);
+    }
+
+    pub fn text(&self, page: usize) -> Option<&PageText> {
+        self.texts.get(&page).map(|t| t.as_ref())
+    }
+
+    pub fn doc_text(&self) -> DocText<'_> {
+        DocText {
+            pages: &self.texts,
+            page_count: self.page_count(),
+        }
+    }
+
+    /// Ask for the text of the visible pages and their neighbours.
+    pub fn request_text(&mut self, vp: &Viewport) {
+        let visible = self.layout.pages_in(vp.y, vp.y + vp.doc_height());
+        let from = visible.start.saturating_sub(1);
+        let to = (visible.end + 1).min(self.page_count());
+        for page in from..to {
+            if self.texts_requested.insert(page) {
+                self.searcher.request_text(page);
+            }
+        }
     }
 
     pub fn page_count(&self) -> usize {

@@ -81,9 +81,9 @@ fn normalize_special(inner: &str) -> Result<String, String> {
 
 fn canonical_key_name(name: &str) -> Option<String> {
     const NAMES: &[&str] = &[
-        "Space", "Esc", "Tab", "CR", "BS", "Del", "Up", "Down", "Left", "Right", "Home", "End",
-        "PageUp", "PageDown", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11",
-        "F12",
+        "Space", "Esc", "Tab", "CR", "BS", "Del", "Copy", "Up", "Down", "Left", "Right", "Home",
+        "End", "PageUp", "PageDown", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10",
+        "F11", "F12",
     ];
     let lower = name.to_ascii_lowercase();
     let alias = match lower.as_str() {
@@ -222,6 +222,54 @@ impl Keymap {
             ("r", Reload),
             ("<Esc>", Cancel),
             ("q", Quit),
+            ("v", Visual { linewise: false }),
+            ("V", Visual { linewise: true }),
+            ("gv", WordHints),
+        ] {
+            k.bind(seq, cmd);
+        }
+        k
+    }
+
+    /// Visual / visual-line mode.
+    pub fn default_visual() -> Self {
+        use crate::selection::Motion as M;
+        use Command::*;
+        let mut k = Self::default();
+        for (seq, cmd) in [
+            ("h", Move(M::Left, 1)),
+            ("<Left>", Move(M::Left, 1)),
+            ("l", Move(M::Right, 1)),
+            ("<Right>", Move(M::Right, 1)),
+            ("j", Move(M::Down, 1)),
+            ("<Down>", Move(M::Down, 1)),
+            ("k", Move(M::Up, 1)),
+            ("<Up>", Move(M::Up, 1)),
+            ("w", Move(M::WordForward, 1)),
+            ("b", Move(M::WordBackward, 1)),
+            ("e", Move(M::WordEnd, 1)),
+            ("0", Move(M::LineStart, 1)),
+            ("^", Move(M::LineStart, 1)),
+            ("$", Move(M::LineEnd, 1)),
+            ("}", Move(M::BlockForward, 1)),
+            ("{", Move(M::BlockBackward, 1)),
+            ("o", SwapEnds),
+            ("v", Visual { linewise: false }),
+            ("V", Visual { linewise: true }),
+            ("y", Yank),
+            ("<Copy>", Yank),
+            ("<D-c>", Yank),
+            ("*", SearchSelection),
+            ("/", EnterSearch(String::new())),
+            ("n", SearchNext(1)),
+            ("N", SearchPrev(1)),
+            ("<C-d>", HalfPageDown(1)),
+            ("<C-u>", HalfPageUp(1)),
+            ("<C-f>", ScreenDown(1)),
+            ("<C-b>", ScreenUp(1)),
+            (":", EnterCommandLine(String::new())),
+            ("?", ToggleHelp),
+            ("<Esc>", Cancel),
         ] {
             k.bind(seq, cmd);
         }
@@ -383,6 +431,13 @@ mod tests {
         let mut km = Keymap::default_normal();
         km.unbind(&parse_sequence("gg").unwrap());
         km.bind("g", Command::GotoLast);
+        let mut st = KeyState::default();
+        assert_eq!(
+            feed_all(&mut st, &km, &["g"]),
+            vec![],
+            "gv still uses the g prefix"
+        );
+        km.unbind(&parse_sequence("gv").unwrap());
         let mut st = KeyState::default();
         assert_eq!(feed_all(&mut st, &km, &["g"]), vec![Command::GotoLast]);
     }

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::links::{HintAction, LinkTarget};
+use crate::selection::Motion;
 
 /// Every user action, whichever input produced it: key bindings, the `:`
 /// command line, the mouse, toolbar buttons.
@@ -52,6 +53,22 @@ pub enum Command {
     },
     SetMark(char),
     GotoMark(char),
+    /// Enter visual mode (`linewise`: `V`), switch kind, or leave it.
+    Visual {
+        linewise: bool,
+    },
+    /// Move the visual-mode caret.
+    Move(Motion, u32),
+    /// Swap the selection's caret and anchor (`o`).
+    SwapEnds,
+    /// Copy the selection and leave visual mode.
+    Yank,
+    /// Search for the selected text (`*`).
+    SearchSelection,
+    /// Labels on visible words; typing one starts visual mode there.
+    WordHints,
+    /// Copy this text (context menu: link address).
+    CopyText(String),
     /// Open the `:` command line, optionally prefilled.
     EnterCommandLine(String),
     /// Open the `/` search line, optionally prefilled.
@@ -110,6 +127,12 @@ const SIMPLE: &[(&str, Command)] = &[
     ("fit_page", Command::FitPage),
     ("hints", Command::Hints(HintAction::Follow)),
     ("hints_copy", Command::Hints(HintAction::CopyAddress)),
+    ("visual", Command::Visual { linewise: false }),
+    ("visual_line", Command::Visual { linewise: true }),
+    ("swap_ends", Command::SwapEnds),
+    ("yank", Command::Yank),
+    ("search_selection", Command::SearchSelection),
+    ("word_hints", Command::WordHints),
     ("set_mark", Command::AwaitMark { set: true }),
     ("goto_mark", Command::AwaitMark { set: false }),
     ("toggle_statusbar", Command::ToggleStatusbar),
@@ -142,6 +165,7 @@ impl Command {
             SearchNext(k) => SearchNext(k * n),
             JumpBack(k) => JumpBack(k * n),
             JumpForward(k) => JumpForward(k * n),
+            Move(m, k) => Move(m, k * n),
             SearchPrev(k) => SearchPrev(k * n),
             GotoFirst | GotoLast | GotoPage(_) => GotoPage(n as usize),
             other => other,
@@ -155,6 +179,17 @@ impl Command {
             Some((n, a)) => (n, Some(a.trim())),
             None => (s, None),
         };
+        if let Some((_, motion)) = Motion::ALL.iter().find(|(n, _)| *n == name) {
+            let n = match arg {
+                None => 1,
+                Some(a) => a
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|n| *n >= 1)
+                    .ok_or_else(|| format!("'{name}' takes a positive count, got '{a}'"))?,
+            };
+            return Ok(Command::Move(*motion, n));
+        }
         if let Some((_, make)) = COUNTED.iter().find(|(n, _)| *n == name) {
             let n = match arg {
                 None => 1,
@@ -222,6 +257,8 @@ impl Command {
             Command::EnterSearch(s) => format!("search_prompt {s}"),
             Command::Search(s) => format!("search {s}"),
             Command::SetMark(c) => format!("set_mark {c}"),
+            Command::Move(m, 1) => m.name().to_owned(),
+            Command::Move(m, n) => format!("{} {n}", m.name()),
             Command::GotoMark(c) => format!("goto_mark {c}"),
             Command::Open(p) => format!("open {}", p.display()),
             other => format!("{other:?}"),
@@ -340,6 +377,10 @@ mod tests {
             "jump_back",
             "set_mark",
             "set_mark a",
+            "visual_line",
+            "word_end",
+            "line_start 2",
+            "yank",
             "command_line",
             "quit",
         ] {

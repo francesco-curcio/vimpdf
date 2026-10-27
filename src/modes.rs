@@ -8,6 +8,8 @@ pub enum Mode {
     Search,
     /// Link hint labels on screen (`f`).
     Hints,
+    /// Selecting text (`v` / `V`, or a mouse selection).
+    Visual,
 }
 
 impl Mode {
@@ -17,6 +19,7 @@ impl Mode {
             Mode::Command => "COMMAND",
             Mode::Search => "SEARCH",
             Mode::Hints => "HINTS",
+            Mode::Visual => "VISUAL",
         }
     }
 }

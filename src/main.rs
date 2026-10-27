@@ -8,6 +8,7 @@ mod links;
 mod modes;
 mod render;
 mod search;
+mod selection;
 mod text;
 mod ui;
 mod view;

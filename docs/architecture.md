@@ -84,12 +84,33 @@ stretched old tiles cover the gap. The texture cache is an LRU bounded at
 ## Text and search
 
 `document::page_text` turns MuPDF's structured text into `text::PageText`:
-characters with page-relative boxes, grouped into lines and blocks in MuPDF's
-reading order. `PageText::find` searches a normalised copy (whitespace runs
+characters with page-relative boxes, font size and baseline, grouped into
+lines and blocks (≈ paragraphs). `PageText::from_raw` repairs MuPDF's raw
+structure with a few heuristics based on font size and baselines (glyph boxes
+vary too much between fonts): it drops margin line numbers, merges fragments
+of one visual line (justified text, sub/superscripts) inserting spaces at
+gaps, joins blocks that continue a paragraph (also across a column break) and
+splits blocks into paragraphs at first-line indents and larger gaps. `PageText::find` searches a normalised copy (whitespace runs
 collapsed, lines joined with a space, words hyphenated at a line end joined
 back, optional case folding) and maps matches back to character indices;
 `PageText::rects` gives one rectangle per line of a match. The UI keeps
 results in `search::SearchState` (per document) for `n`/`N` and highlighting.
+
+## Selection and visual mode
+
+`selection.rs` works on the page texts the UI has loaded (`DocText`):
+positions are (page, character index); motions (`w`, `b`, `e`, `j`/`k` with a
+preferred x, `{`/`}` …) cross pages when the neighbouring page's text is
+loaded. `Selection` (anchor + caret, char- or line-wise) produces highlight
+spans per page and the cleaned-up text for copying. The text worker in
+`search.rs` also serves page text on request; `DocView::request_text` asks
+for the visible pages and their neighbours every frame (each page once).
+
+`app/visual.rs` holds the app side: entering visual mode (at the current
+search match or the first line on screen), caret motions and keeping the caret
+visible, copying, mouse dragging / double / triple / Shift-click selection,
+panning, and the right-click menu (whose entries all name their keys).
+`app/hints.rs` handles both link hints and word hints (`gv`).
 
 ## Links, hints, jumps
 
@@ -124,6 +145,8 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `text.rs` | Page text model, matching, match rectangles |
 | `search.rs` | Search worker and result state |
 | `jumplist.rs` | Jump history and marks |
+| `selection.rs` | Text positions, caret motions, selections, clean copying |
+| `app/hints.rs`, `app/searching.rs`, `app/visual.rs` | App-side hint mode, search, visual mode and mouse selection |
 | `config.rs` | Options, TOML loading, `:set` |
 | `modes.rs` | Input modes |
 | `ui/` | Status bar, command line, toolbar, help overlay, font lookup |

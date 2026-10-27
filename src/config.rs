@@ -72,8 +72,9 @@ pub struct Config {
     pub pan_modifier: Modifier,
     pub zoom_modifier: Modifier,
     pub copy_on_select: bool,
-    /// Key binding overrides for normal mode, in file order.
+    /// Key binding overrides, in file order.
     pub normal_keys: Vec<(String, String)>,
+    pub visual_keys: Vec<(String, String)>,
 }
 
 impl Default for Config {
@@ -103,6 +104,7 @@ impl Default for Config {
             zoom_modifier: Modifier::Cmd,
             copy_on_select: false,
             normal_keys: Vec::new(),
+            visual_keys: Vec::new(),
         }
     }
 }
@@ -230,15 +232,19 @@ impl Config {
                 warnings.push(format!("config: keys.{mode} should be a table"));
                 continue;
             };
-            if mode != "normal" {
-                warnings.push(format!(
-                    "config: keys.{mode}: '{mode}' mode doesn't exist yet; ignored"
-                ));
-                continue;
-            }
+            let target = match mode.as_str() {
+                "normal" => &mut self.normal_keys,
+                "visual" => &mut self.visual_keys,
+                _ => {
+                    warnings.push(format!(
+                        "config: keys.{mode}: no mode called '{mode}' (use normal or visual)"
+                    ));
+                    continue;
+                }
+            };
             for (seq, action) in bindings {
                 match action.as_str() {
-                    Some(a) => self.normal_keys.push((seq.clone(), a.to_owned())),
+                    Some(a) => target.push((seq.clone(), a.to_owned())),
                     None => warnings.push(format!(
                         "config: keys.{mode}.\"{seq}\": expected a command string"
                     )),
@@ -310,23 +316,35 @@ impl Config {
 
     /// The default normal-mode keymap with this config's overrides.
     pub fn normal_keymap(&self) -> (Keymap, Vec<String>) {
-        let mut keymap = Keymap::default_normal();
-        let mut warnings = Vec::new();
-        for (seq, action) in &self.normal_keys {
-            let result = parse_sequence(seq).and_then(|parsed| {
-                if action.trim().is_empty() {
-                    keymap.unbind(&parsed);
-                    Ok(())
-                } else {
-                    Command::parse(action).map(|cmd| keymap.bind_parsed(parsed, cmd))
-                }
-            });
-            if let Err(e) = result {
-                warnings.push(format!("config: keys.normal.\"{seq}\": {e}"));
-            }
-        }
-        (keymap, warnings)
+        apply_overrides(Keymap::default_normal(), &self.normal_keys, "normal")
     }
+
+    /// The default visual-mode keymap with this config's overrides.
+    pub fn visual_keymap(&self) -> (Keymap, Vec<String>) {
+        apply_overrides(Keymap::default_visual(), &self.visual_keys, "visual")
+    }
+}
+
+fn apply_overrides(
+    mut keymap: Keymap,
+    overrides: &[(String, String)],
+    mode: &str,
+) -> (Keymap, Vec<String>) {
+    let mut warnings = Vec::new();
+    for (seq, action) in overrides {
+        let result = parse_sequence(seq).and_then(|parsed| {
+            if action.trim().is_empty() {
+                keymap.unbind(&parsed);
+                Ok(())
+            } else {
+                Command::parse(action).map(|cmd| keymap.bind_parsed(parsed, cmd))
+            }
+        });
+        if let Err(e) = result {
+            warnings.push(format!("config: keys.{mode}.\"{seq}\": {e}"));
+        }
+    }
+    (keymap, warnings)
 }
 
 fn resolve_option(option: &str) -> Result<&'static str, String> {
@@ -431,6 +449,9 @@ caret = "red"
 
 [keys.visual]
 "Y" = "yank_line"
+
+[keys.insert]
+"x" = "quit"
 "##;
         let (c, w) = Config::from_toml(text);
         assert_eq!(c.font_size, 14.0);
@@ -440,6 +461,8 @@ caret = "red"
 
         let (keymap, w) = c.normal_keymap();
         assert_eq!(w.len(), 2, "{w:#?}");
+        let (_, w) = c.visual_keymap();
+        assert_eq!(w.len(), 1, "unknown command yank_line: {w:#?}");
         assert_eq!(
             keymap.get(&["j".to_owned()]),
             Some(&Command::ScrollDown(1)),

@@ -4,10 +4,15 @@ use super::{ACCENT, BAR_DIM};
 use crate::input::keymap::Keymap;
 
 const MOUSE: &[(&str, &str)] = &[
-    ("wheel / two-finger scroll", "scroll"),
-    ("pinch, Cmd + wheel", "zoom at the pointer"),
-    ("click a link", "follow it"),
-    ("click page number in status bar", "go to page"),
+    ("wheel / two-finger scroll", "scroll (j k h l)"),
+    ("pinch, Cmd + wheel", "zoom at the pointer (+ -)"),
+    ("click a link", "follow it (f)"),
+    ("drag over text", "select (v + motions)"),
+    ("double / triple click", "select word / line (gv, V)"),
+    ("Shift + click", "extend the selection"),
+    ("Alt + drag, middle drag", "pan (h j k l)"),
+    ("right click", "menu: copy (y), search (*), link (f, yf)"),
+    ("click page number in status bar", "go to page (:<n>)"),
 ];
 
 const EX_COMMANDS: &[(&str, &str)] = &[
@@ -23,7 +28,13 @@ const EX_COMMANDS: &[(&str, &str)] = &[
 ];
 
 /// The `?` overlay, generated from the active keymap so config overrides show.
-pub fn show(ctx: &egui::Context, keymap: &Keymap, open: &mut bool, font_size: f32) {
+pub fn show(
+    ctx: &egui::Context,
+    keymap: &Keymap,
+    visual: &Keymap,
+    open: &mut bool,
+    font_size: f32,
+) {
     let mono = FontId::monospace(font_size);
     let max = ctx.content_rect().size() * Vec2::new(0.8, 0.85);
     egui::Window::new("Keys")
@@ -46,6 +57,15 @@ pub fn show(ctx: &egui::Context, keymap: &Keymap, open: &mut bool, font_size: f3
                     RichText::new("Counts: 5j scrolls 5 steps, 12G goes to page 12.")
                         .color(BAR_DIM),
                 );
+
+                section(ui, "Visual mode (v, V, gv, or a mouse selection)", &mono);
+                Grid::new("help-visual").striped(true).show(ui, |ui| {
+                    for (keys, cmd) in visual.describe() {
+                        ui.label(RichText::new(keys).font(mono.clone()).color(ACCENT));
+                        ui.label(RichText::new(cmd.describe()).font(mono.clone()));
+                        ui.end_row();
+                    }
+                });
 
                 section(ui, "Mouse", &mono);
                 pairs(ui, "help-mouse", MOUSE, &mono);

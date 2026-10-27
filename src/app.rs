@@ -9,7 +9,7 @@ use crate::input::command::{Command, parse_ex};
 use crate::input::keymap::{KeyState, Keymap};
 use crate::input::{key_tokens, mouse};
 use crate::jumplist::{JumpList, Position};
-use crate::links::{self, HintAction, LinkTarget, PageLink};
+use crate::links::{self, HintAction, LinkTarget};
 use crate::modes::Mode;
 use crate::render::ScaleKey;
 use crate::search::{MatchId, SearchEvent, SearchRequest};
@@ -19,6 +19,13 @@ use crate::ui::toolbar::{self, Toolbar};
 use crate::ui::{self, fonts, help, statusbar};
 use crate::view::DocView;
 use crate::viewport::{FitMode, Viewport};
+
+mod hints;
+mod searching;
+mod visual;
+
+use hints::HintState;
+use visual::{ContextMenu, Drag};
 
 const BACKGROUND: Color32 = Color32::from_gray(40);
 /// Space around pages in the fit modes, in screen points.
@@ -56,13 +63,14 @@ pub struct PdfvApp {
     first_frame: bool,
     jumps: JumpList,
     hints: Option<HintState>,
-}
-
-/// Link hints on screen (`f`): labels, and what has been typed so far.
-struct HintState {
-    action: HintAction,
-    typed: String,
-    hints: Vec<(String, usize, PageLink)>,
+    visual_keymap: Keymap,
+    selection: Option<crate::selection::Selection>,
+    /// `v` was pressed while page text was still loading (value: linewise).
+    visual_pending: Option<bool>,
+    /// Mode to return to after a `:` or `/` prompt (normal or visual).
+    prompt_return: Mode,
+    drag: Option<Drag>,
+    menu: Option<ContextMenu>,
 }
 
 impl PdfvApp {
@@ -79,6 +87,8 @@ impl PdfvApp {
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
 
         let (keymap, key_warnings) = config.normal_keymap();
+        warnings.extend(key_warnings);
+        let (visual_keymap, key_warnings) = config.visual_keymap();
         warnings.extend(key_warnings);
 
         let mut app = Self {
@@ -100,6 +110,12 @@ impl PdfvApp {
             first_frame: true,
             jumps: JumpList::default(),
             hints: None,
+            visual_keymap,
+            selection: None,
+            visual_pending: None,
+            prompt_return: Mode::Normal,
+            drag: None,
+            menu: None,
         };
         app.install_font(ctx, &mut warnings);
         app.report_warnings(warnings);
@@ -213,8 +229,11 @@ impl PdfvApp {
         let (config, mut warnings) = Config::load(&path);
         let (keymap, key_warnings) = config.normal_keymap();
         warnings.extend(key_warnings);
+        let (visual_keymap, key_warnings) = config.visual_keymap();
+        warnings.extend(key_warnings);
         self.config = config;
         self.keymap = keymap;
+        self.visual_keymap = visual_keymap;
         self.keys.reset();
         self.install_font(ctx, &mut warnings);
         if warnings.is_empty() {
@@ -266,6 +285,18 @@ impl PdfvApp {
             Some(vp) => (vp.height, self.config.zoom_step),
             None => return,
         };
+        if self.mode == Mode::Visual {
+            let dy = match cmd {
+                Command::HalfPageDown(n) => n as f32 * screen / 2.0,
+                Command::HalfPageUp(n) => -(n as f32) * screen / 2.0,
+                Command::ScreenDown(n) => n as f32 * screen,
+                Command::ScreenUp(n) => -(n as f32) * screen,
+                _ => 0.0,
+            };
+            if dy != 0.0 {
+                self.caret_follow_scroll(dy);
+            }
+        }
         match cmd {
             Command::ScrollDown(n) => return self.scroll(0.0, n as f32 * step),
             Command::ScrollUp(n) => return self.scroll(0.0, -(n as f32) * step),
@@ -359,11 +390,13 @@ impl PdfvApp {
             },
             Command::EnterCommandLine(prefill) => {
                 self.keys.reset();
+                self.prompt_return = self.prompt_mode();
                 self.mode = Mode::Command;
                 self.cmdline.open(&prefill);
             }
             Command::EnterSearch(prefill) => {
                 self.keys.reset();
+                self.prompt_return = self.prompt_mode();
                 self.mode = Mode::Search;
                 self.searchline.open(&prefill);
             }
@@ -400,6 +433,21 @@ impl PdfvApp {
                 self.message = None;
                 self.show_help = false;
                 self.view.search.highlight = false;
+                self.exit_visual();
+            }
+            Command::Visual { linewise } => self.visual(linewise),
+            Command::Move(motion, n) => self.move_caret(motion, n as usize),
+            Command::SwapEnds => self.swap_ends(),
+            Command::Yank => self.yank(ctx),
+            Command::SearchSelection => {
+                if let Some(cmd) = self.search_selection() {
+                    self.execute(cmd, ctx);
+                }
+            }
+            Command::WordHints => self.start_word_hints(),
+            Command::CopyText(text) => {
+                ctx.copy_text(text.clone());
+                self.info(format!("Copied {text}"));
             }
             Command::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
             Command::ScrollDown(_)
@@ -435,242 +483,12 @@ impl PdfvApp {
         self.pending_scroll = Vec2::ZERO;
     }
 
-    /// Label every link on screen (`f`, `yf`).
-    fn start_hints(&mut self, action: HintAction) {
-        let Some(vp) = &self.viewport else { return };
-        let layout = &self.view.layout;
-        let (vx0, vy0) = (vp.x, vp.y);
-        let (vx1, vy1) = (vp.x + vp.doc_width(), vp.y + vp.doc_height());
-        let mut visible = Vec::new();
-        for page in layout.pages_in(vy0, vy1) {
-            let r = layout.page(page);
-            for link in self.view.links.get(page).into_iter().flatten() {
-                let (x0, y0) = (r.x + link.x0, r.y + link.y0);
-                let (x1, y1) = (r.x + link.x1, r.y + link.y1);
-                if x1 >= vx0 && x0 <= vx1 && y1 >= vy0 && y0 <= vy1 {
-                    visible.push((page, link.clone()));
-                }
-            }
-        }
-        if visible.is_empty() {
-            return self.info("No links on screen");
-        }
-        // Reading order: top to bottom, then left to right.
-        visible.sort_by(|(pa, a), (pb, b)| {
-            (pa, a.y0.round() as i32, a.x0.round() as i32).cmp(&(
-                pb,
-                b.y0.round() as i32,
-                b.x0.round() as i32,
-            ))
-        });
-        let labels = links::hint_labels(visible.len());
-        for (label, (page, link)) in labels.iter().zip(&visible) {
-            tracing::trace!(label, page = page + 1, target = ?link.target, "hint");
-        }
-        self.hints = Some(HintState {
-            action,
-            typed: String::new(),
-            hints: labels
-                .into_iter()
-                .zip(visible)
-                .map(|(l, (p, link))| (l, p, link))
-                .collect(),
-        });
-        self.keys.reset();
-        self.mode = Mode::Hints;
-    }
-
-    /// A key typed in hint mode. Returns a command once a label is complete.
-    fn hint_key(&mut self, ctx: &egui::Context, tok: &str) -> Option<Command> {
-        let state = self.hints.as_mut()?;
-        match tok {
-            "<Esc>" => {}
-            "<BS>" => {
-                state.typed.pop();
-                return None;
-            }
-            t if t.chars().count() == 1 => {
-                state.typed.push_str(&t.to_lowercase());
-                let matching: Vec<&(String, usize, PageLink)> = state
-                    .hints
-                    .iter()
-                    .filter(|(l, _, _)| l.starts_with(&state.typed))
-                    .collect();
-                match matching.as_slice() {
-                    [] => {}
-                    [(label, _, link)] if *label == state.typed => {
-                        let (action, target) = (state.action, link.target.clone());
-                        self.hints = None;
-                        self.mode = Mode::Normal;
-                        return match action {
-                            HintAction::Follow => Some(Command::FollowLink(target)),
-                            HintAction::CopyAddress => {
-                                let text = match &target {
-                                    LinkTarget::External(uri) => uri.clone(),
-                                    LinkTarget::Internal { page, .. } => {
-                                        format!("page {}", page + 1)
-                                    }
-                                };
-                                ctx.copy_text(text.clone());
-                                self.info(format!("Copied {text}"));
-                                None
-                            }
-                        };
-                    }
-                    _ => return None, // keep typing
-                }
-            }
-            _ => return None,
-        }
-        // Esc, or a label that matches nothing.
-        self.hints = None;
-        self.mode = Mode::Normal;
-        None
-    }
-
-    fn draw_hints(&self, painter: &egui::Painter, area: Rect, vp: &Viewport) {
-        let Some(state) = &self.hints else { return };
-        let font = FontId::monospace(self.config.font_size.max(11.0) - 1.0);
-        let bg = color32(self.config.colors.hint_background);
-        let layout = &self.view.layout;
-        for (label, page, link) in &state.hints {
-            if !label.starts_with(&state.typed) {
-                continue;
-            }
-            let r = layout.page(*page);
-            let (x, y) = vp.to_view(r.x + link.x0, r.y + link.y0);
-            let pos = area.min + Vec2::new(x, y);
-            let galley = painter.layout_no_wrap(label.to_uppercase(), font.clone(), Color32::BLACK);
-            let rect = Rect::from_min_size(pos, galley.size()).expand2(Vec2::new(3.0, 1.0));
-            painter.rect_filled(rect, 3.0, bg);
-            painter.galley(pos, galley, Color32::BLACK);
-        }
-    }
-
-    fn start_search(&mut self, query: String, page: usize, origin_y: f32) {
-        let query = if query.trim().is_empty() {
-            self.view.search.query.clone()
+    /// The mode a prompt returns to: visual stays visual.
+    fn prompt_mode(&self) -> Mode {
+        if self.mode == Mode::Visual {
+            Mode::Visual
         } else {
-            query
-        };
-        if query.trim().is_empty() {
-            return self.error("No previous search");
-        }
-        let search = &mut self.view.search;
-        search.start(query.clone(), page, origin_y);
-        self.view.searcher.request(SearchRequest {
-            id: search.id,
-            case_sensitive: text::is_case_sensitive(&query),
-            query,
-            start_page: page,
-            page_count: self.view.page_count(),
-        });
-    }
-
-    fn search_step(&mut self, n: usize, forward: bool) {
-        let search = &mut self.view.search;
-        match search.step(n, forward) {
-            Some(m) => self.show_match(m),
-            None if search.running => self.info("Still searching…"),
-            None if search.query.is_empty() => self.error("No previous search"),
-            None => {
-                let q = search.query.clone();
-                self.error(format!("Pattern not found: {q}"));
-            }
-        }
-    }
-
-    /// Handle search results from the worker; jump to the first match.
-    fn receive_search(&mut self) {
-        while let Some(event) = self.view.searcher.try_recv() {
-            let search = &mut self.view.search;
-            match event {
-                SearchEvent::Matches { id, page, matches } if id == search.id => {
-                    if let Some(m) = search.add(page, matches) {
-                        self.show_match(m);
-                    }
-                }
-                SearchEvent::Done { id } if id == search.id => {
-                    if let Some(m) = search.finish() {
-                        self.show_match(m);
-                    } else if search.total() == 0 {
-                        let q = search.query.clone();
-                        self.error(format!("Pattern not found: {q}"));
-                    }
-                }
-                _ => {} // results of an older search
-            }
-        }
-    }
-
-    /// Scroll so a search match is visible, a third of the way down.
-    fn show_match(&mut self, m: MatchId) {
-        let Some(vp) = self.viewport.as_mut() else {
-            return;
-        };
-        let Some(rects) = self.view.search.rects(m) else {
-            return;
-        };
-        let Some(first) = rects.first() else { return };
-        let page = self.view.layout.page(m.0);
-        let (x0, y0) = (page.x + first.x0, page.y + first.y0);
-        let (x1, y1) = (page.x + first.x1, page.y + first.y1);
-        if y0 < vp.y || y1 > vp.y + vp.doc_height() {
-            let layout = &self.view.layout;
-            let cur = vp.current_page(layout);
-            self.jumps.push(Position {
-                page: cur,
-                offset: vp.y - layout.page(cur).y,
-                x: vp.x,
-            });
-            vp.y = y0 - vp.doc_height() / 3.0;
-        }
-        if x0 < vp.x || x1 > vp.x + vp.doc_width() {
-            vp.x = (x0 + x1) / 2.0 - vp.doc_width() / 2.0;
-        }
-        self.pending_scroll = Vec2::ZERO;
-    }
-
-    fn draw_search_highlights(&self, painter: &egui::Painter, area: Rect, vp: &Viewport) {
-        let search = &self.view.search;
-        if !search.highlight || search.results.is_empty() {
-            return;
-        }
-        let fill = color32(self.config.colors.search_highlight);
-        let [r, g, b, _] = self.config.colors.hint_background.0;
-        let current_fill = Color32::from_rgba_unmultiplied(r, g, b, 150);
-        let layout = &self.view.layout;
-        for page in layout.pages_in(vp.y, vp.y + vp.doc_height()) {
-            let Some(matches) = search.results.get(&page) else {
-                continue;
-            };
-            let p = layout.page(page);
-            for (i, rects) in matches.iter().enumerate() {
-                let current = search.current == Some((page, i));
-                for t in rects {
-                    let (ax, ay) = vp.to_view(p.x + t.x0, p.y + t.y0);
-                    let (bx, by) = vp.to_view(p.x + t.x1, p.y + t.y1);
-                    let rect = Rect::from_min_max(
-                        area.min + Vec2::new(ax, ay),
-                        area.min + Vec2::new(bx, by),
-                    )
-                    .expand(1.0);
-                    painter.rect_filled(rect, 2.0, if current { current_fill } else { fill });
-                }
-            }
-        }
-    }
-
-    fn search_status(&self) -> String {
-        let s = &self.view.search;
-        if s.query.is_empty() {
-            return String::new();
-        }
-        match (s.position(), s.running) {
-            (Some(i), true) => format!("[{i}/{}+ searching…]", s.total()),
-            (Some(i), false) => format!("[{i}/{}]", s.total()),
-            (None, true) => "[searching…]".into(),
-            (None, false) => String::new(),
+            Mode::Normal
         }
     }
 
@@ -684,7 +502,8 @@ impl PdfvApp {
                 .filter_map(|tok| self.hint_key(ctx, tok))
                 .collect();
         }
-        if self.mode != Mode::Normal || ctx.egui_wants_keyboard_input() {
+        let visual = self.mode == Mode::Visual;
+        if !(self.mode == Mode::Normal || visual) || ctx.egui_wants_keyboard_input() {
             return Vec::new();
         }
         let events = ctx.input(|i| i.events.clone());
@@ -697,7 +516,12 @@ impl PdfvApp {
                 }
                 continue;
             }
-            let Some(cmd) = self.keys.feed(&tok, &self.keymap) else {
+            let keymap = if visual {
+                &self.visual_keymap
+            } else {
+                &self.keymap
+            };
+            let Some(cmd) = self.keys.feed(&tok, keymap) else {
                 continue;
             };
             let (prefill, search) = match cmd {
@@ -788,7 +612,15 @@ impl eframe::App for PdfvApp {
         // Input → commands.
         let mut commands = self.keyboard_commands(&ctx);
         let mut cursor = egui::CursorIcon::Default;
+        if !ctx.egui_wants_pointer_input() && self.menu.is_none() {
+            let (cmds, text_cursor) = self.mouse_selection(&ctx, area);
+            commands.extend(cmds);
+            if let Some(c) = text_cursor {
+                cursor = c;
+            }
+        }
         if !ctx.egui_wants_pointer_input()
+            && self.menu.is_none()
             && let Some(vp) = &self.viewport
         {
             let m = mouse::handle(
@@ -800,7 +632,12 @@ impl eframe::App for PdfvApp {
                 self.config.zoom_modifier,
             );
             commands.extend(m.commands);
-            cursor = m.cursor;
+            if m.cursor != egui::CursorIcon::Default {
+                cursor = m.cursor;
+            }
+        }
+        if let Some(linewise) = self.visual_pending {
+            self.visual(linewise);
         }
         let Some(vp) = &self.viewport else { return };
         let (y_before, zoom_before) = (vp.y, vp.zoom);
@@ -836,6 +673,7 @@ impl eframe::App for PdfvApp {
         vp.clamp(&self.view.layout);
         let vp = vp.clone();
         self.view.receive_results(&ctx);
+        self.view.request_text(&vp);
         let scale = ScaleKey::from_scale(vp.zoom * ctx.pixels_per_point());
         self.view.schedule(&ctx, &vp, scale, self.scrolling_up);
         let painter = ui.painter().with_clip_rect(area);
@@ -843,6 +681,7 @@ impl eframe::App for PdfvApp {
         let page_color = color32(self.config.colors.page_background);
         self.view.draw(&painter, area, &vp, scale, page_color);
         self.draw_search_highlights(&painter, area, &vp);
+        self.draw_selection(&painter, area, &vp);
         self.draw_hints(&painter, area, &vp);
 
         // Bars and overlays.
@@ -866,9 +705,9 @@ impl eframe::App for PdfvApp {
         match (bottom_rect, self.mode) {
             (Some(rect), Mode::Command) => match self.cmdline.show(ui, rect, font_size) {
                 Outcome::Editing => {}
-                Outcome::Cancel => self.mode = Mode::Normal,
+                Outcome::Cancel => self.mode = self.prompt_return,
                 Outcome::Submit(line) => {
-                    self.mode = Mode::Normal;
+                    self.mode = self.prompt_return;
                     match parse_ex(&line) {
                         Ok(Some(cmd)) => ui_commands.push(cmd),
                         Ok(None) => {}
@@ -878,16 +717,21 @@ impl eframe::App for PdfvApp {
             },
             (Some(rect), Mode::Search) => match self.searchline.show(ui, rect, font_size) {
                 Outcome::Editing => {}
-                Outcome::Cancel => self.mode = Mode::Normal,
+                Outcome::Cancel => self.mode = self.prompt_return,
                 Outcome::Submit(line) => {
-                    self.mode = Mode::Normal;
+                    self.mode = self.prompt_return;
                     ui_commands.push(Command::Search(line));
                 }
             },
-            (Some(rect), Mode::Normal | Mode::Hints) => {
+            (Some(rect), Mode::Normal | Mode::Hints | Mode::Visual) => {
                 let file = self.view.file_name();
+                let linewise = self.selection.is_some_and(|s| s.linewise);
                 let status = statusbar::Status {
-                    mode: self.mode.label(),
+                    mode: if self.mode == Mode::Visual && linewise {
+                        "V-LINE"
+                    } else {
+                        self.mode.label()
+                    },
                     file: &file,
                     page,
                     pages,
@@ -917,7 +761,16 @@ impl eframe::App for PdfvApp {
             }
         }
         if self.show_help {
-            help::show(&ctx, &self.keymap, &mut self.show_help, font_size);
+            help::show(
+                &ctx,
+                &self.keymap,
+                &self.visual_keymap,
+                &mut self.show_help,
+                font_size,
+            );
+        }
+        if let Some(cmd) = self.context_menu(&ctx) {
+            ui_commands.push(cmd);
         }
 
         if !ui_commands.is_empty() {

@@ -58,9 +58,9 @@ Colours are `"#rrggbb"` or `"#rrggbbaa"`.
 | Option | Default | Description |
 | --- | --- | --- |
 | `zoom_modifier` | `"cmd"` | Modifier that turns the wheel into zoom: `"cmd"`, `"ctrl"`, `"alt"` or `"shift"`. Pinch always zooms. |
-| `drag` | `"select"` | What dragging on a page does: `"select"` text or `"pan"` — M6. |
-| `pan_modifier` | `"alt"` | Modifier that makes a drag pan — M6. |
-| `copy_on_select` | `false` | Copy mouse selections to the clipboard immediately — M6. |
+| `drag` | `"select"` | What dragging on a page does: `"select"` text or `"pan"` the view. |
+| `pan_modifier` | `"alt"` | Holding it swaps the drag behaviour (pans when `drag = "select"`, selects when `"pan"`). Middle-drag always pans. |
+| `copy_on_select` | `false` | Copy mouse selections to the clipboard as soon as the drag ends. |
 
 Options marked with a milestone are accepted now and take effect when that
 feature lands.
@@ -83,7 +83,15 @@ letter implies Shift), `<A-x>` (Alt/Option), `<D-x>` (Cmd), `<S-Space>`,
 Sequences combine them: `"gg"`, `"m<Tab>"`. A count typed before a binding
 multiplies it (`5x` with the example above scrolls 15 steps).
 
-Only `[keys.normal]` exists for now; other modes arrive with their milestones.
+There are two modes with their own bindings: `[keys.normal]` and
+`[keys.visual]` (text selection).
+
+```toml
+[keys.visual]
+"Y" = "yank"
+"H" = "line_start"
+"L" = "line_end"
+```
 
 ### Commands
 
@@ -106,6 +114,8 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `search <text>` | — (`:search foo` searches without opening the prompt) |
 | `search_next [n]`, `search_prev [n]` | `n`, `N` |
 | `hints`, `hints_copy` | `f`, `yf` |
+| `visual`, `visual_line` | `v`, `V` (also in visual mode: switch or leave) |
+| `word_hints` | `gv` |
 | `jump_back [n]`, `jump_forward [n]` | `<C-o>`, `<C-i>` |
 | `set_mark [letter]`, `goto_mark [letter]` | `m`, `'` and `` ` `` (without a letter they wait for the next key) |
 | `toggle_toolbar`, `toggle_statusbar` | `<C-t>`, — |
@@ -116,3 +126,17 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `open <path>` | — |
 | `cancel` | `<Esc>` |
 | `quit` | `q` |
+
+Visual mode only:
+
+| Command | Default keys |
+| --- | --- |
+| `caret_left [n]`, `caret_right [n]` | `h` `<Left>`, `l` `<Right>` |
+| `caret_down [n]`, `caret_up [n]` | `j` `<Down>`, `k` `<Up>` |
+| `word_forward [n]`, `word_backward [n]`, `word_end [n]` | `w`, `b`, `e` |
+| `line_start [n]`, `line_end [n]` | `0` `^`, `$` |
+| `block_forward [n]`, `block_backward [n]` | `}`, `{` |
+| `swap_ends` | `o` |
+| `yank` | `y`, `Cmd+C` |
+| `search_selection` | `*` |
+| also: `half_page_down/up`, `screen_down/up`, `search_prompt`, `search_next/prev`, `command_line`, `toggle_help`, `cancel` | `<C-d>` `<C-u>` `<C-f>` `<C-b>` `/` `n` `N` `:` `?` `<Esc>` |

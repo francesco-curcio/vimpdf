@@ -9,7 +9,7 @@ use mupdf::{
 };
 
 use crate::links::{LinkTarget, PageLink};
-use crate::text::{PageText, TextChar};
+use crate::text::{PageText, RawBlocks, TextChar};
 
 /// Page size in PDF points, plus the origin of the page's bounds in MuPDF
 /// page space (usually 0,0; link and text coordinates are relative to it).
@@ -136,34 +136,39 @@ pub fn page_text(doc: &Document, page: usize) -> Result<PageText> {
         .with_context(|| format!("cannot load page {}", page + 1))?;
     let bounds = p.bounds()?;
     let stext = p.to_text_page(TextPageFlags::empty())?;
-    let mut out = PageText::default();
+    let mut raw: RawBlocks = Vec::new();
     for block in stext.blocks() {
-        let first_line = out.lines.len();
+        let mut lines = Vec::new();
         for line in block.lines() {
-            let start = out.chars.len();
-            for ch in line.chars() {
-                let Some(c) = ch.char() else { continue };
-                let q = ch.quad();
-                let xs = [q.ul.x, q.ur.x, q.ll.x, q.lr.x];
-                let ys = [q.ul.y, q.ur.y, q.ll.y, q.lr.y];
-                let min = |v: [f32; 4]| v.into_iter().fold(f32::INFINITY, f32::min);
-                let max = |v: [f32; 4]| v.into_iter().fold(f32::NEG_INFINITY, f32::max);
-                out.chars.push(TextChar {
-                    c,
-                    x0: min(xs) - bounds.x0,
-                    y0: min(ys) - bounds.y0,
-                    x1: max(xs) - bounds.x0,
-                    y1: max(ys) - bounds.y0,
-                });
-            }
-            if out.chars.len() > start {
-                out.lines.push(start..out.chars.len());
+            let chars: Vec<TextChar> = line
+                .chars()
+                .filter_map(|ch| {
+                    let c = ch.char()?;
+                    let q = ch.quad();
+                    let xs = [q.ul.x, q.ur.x, q.ll.x, q.lr.x];
+                    let ys = [q.ul.y, q.ur.y, q.ll.y, q.lr.y];
+                    let min = |v: [f32; 4]| v.into_iter().fold(f32::INFINITY, f32::min);
+                    let max = |v: [f32; 4]| v.into_iter().fold(f32::NEG_INFINITY, f32::max);
+                    Some(TextChar {
+                        c,
+                        x0: min(xs) - bounds.x0,
+                        y0: min(ys) - bounds.y0,
+                        x1: max(xs) - bounds.x0,
+                        y1: max(ys) - bounds.y0,
+                        size: ch.size(),
+                        baseline: ch.origin().y - bounds.y0,
+                    })
+                })
+                .collect();
+            if !chars.is_empty() {
+                lines.push(chars);
             }
         }
-        if out.lines.len() > first_line {
-            out.blocks.push(first_line..out.lines.len());
+        if !lines.is_empty() {
+            raw.push(lines);
         }
     }
+    let out = PageText::from_raw(raw);
     Ok(out)
 }
 
