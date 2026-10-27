@@ -1,6 +1,10 @@
 mod app;
 mod document;
+mod input;
+mod layout;
+mod links;
 mod render;
+mod viewport;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

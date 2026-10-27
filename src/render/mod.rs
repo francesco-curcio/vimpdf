@@ -1,53 +1,123 @@
-//! Background rendering. The worker owns its own MuPDF `Document`; the UI
-//! thread only sends jobs and receives pixel buffers.
+//! Background rendering. Each worker owns its own MuPDF `Document`; the UI
+//! thread only replaces the job queue and receives finished images.
+//!
+//! The queue is a priority list that the UI replaces wholesale whenever the
+//! wanted set changes (visible pages first, then prefetch), so jobs for pages
+//! that scrolled away are dropped before they start.
 
+pub mod cache;
+
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
-use crate::document::{self, RenderedPage};
+use crossbeam_channel::{Receiver, Sender};
+use eframe::egui::ColorImage;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RenderJob {
-    pub page: usize,
-    /// Device pixels per PDF point.
-    pub scale: f32,
+use crate::document;
+
+/// A render scale (device pixels per PDF point) rounded to hundredths, so
+/// nearly identical scales share cache entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ScaleKey(u32);
+
+impl ScaleKey {
+    pub fn from_scale(scale: f32) -> Self {
+        Self((scale * 100.0).round().max(1.0) as u32)
+    }
+
+    pub fn scale(self) -> f32 {
+        self.0 as f32 / 100.0
+    }
+
+    pub fn distance(self, other: Self) -> u32 {
+        self.0.abs_diff(other.0)
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RenderJob {
+    pub page: usize,
+    pub scale: ScaleKey,
+}
+
 pub struct RenderResult {
     pub job: RenderJob,
-    pub image: Result<RenderedPage, String>,
+    /// Converted to an egui image on the worker so the UI thread only uploads.
+    pub image: Result<ColorImage, String>,
+}
+
+#[derive(Default)]
+struct Queue {
+    jobs: VecDeque<RenderJob>,
+    in_progress: HashSet<RenderJob>,
+    shutdown: bool,
+}
+
+impl Queue {
+    /// Replace pending jobs, skipping ones a worker is already rendering.
+    fn replace(&mut self, jobs: impl IntoIterator<Item = RenderJob>) {
+        self.jobs.clear();
+        let mut seen = HashSet::new();
+        for job in jobs {
+            if !self.in_progress.contains(&job) && seen.insert(job) {
+                self.jobs.push_back(job);
+            }
+        }
+    }
+
+    fn pop(&mut self) -> Option<RenderJob> {
+        let job = self.jobs.pop_front()?;
+        self.in_progress.insert(job);
+        Some(job)
+    }
+}
+
+struct Shared {
+    queue: Mutex<Queue>,
+    ready: Condvar,
 }
 
 pub struct Renderer {
-    jobs: Sender<RenderJob>,
+    shared: Arc<Shared>,
     results: Receiver<RenderResult>,
 }
 
 impl Renderer {
-    /// Spawn a worker for `path`. `wake` is called after each finished job so
-    /// the UI can repaint.
-    pub fn spawn(path: PathBuf, wake: impl Fn() + Send + 'static) -> Self {
-        let (job_tx, job_rx) = mpsc::channel::<RenderJob>();
-        let (res_tx, res_rx) = mpsc::channel::<RenderResult>();
+    /// Spawn `workers` render threads for `path`. `wake` is called after each
+    /// finished job so the UI can repaint.
+    pub fn spawn(path: PathBuf, workers: usize, wake: impl Fn() + Send + Sync + 'static) -> Self {
+        let shared = Arc::new(Shared {
+            queue: Mutex::new(Queue::default()),
+            ready: Condvar::new(),
+        });
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let wake = Arc::new(wake);
 
-        thread::Builder::new()
-            .name("pdfv-render".into())
-            .spawn(move || worker(path, job_rx, res_tx, wake))
-            .expect("failed to spawn render thread");
+        for i in 0..workers.max(1) {
+            let shared = Arc::clone(&shared);
+            let tx = tx.clone();
+            let wake = Arc::clone(&wake);
+            let path = path.clone();
+            thread::Builder::new()
+                .name(format!("pdfv-render-{i}"))
+                .spawn(move || worker(path, shared, tx, move || wake()))
+                .expect("failed to spawn render thread");
+        }
 
         Self {
-            jobs: job_tx,
-            results: res_rx,
+            shared,
+            results: rx,
         }
     }
 
-    pub fn request(&self, job: RenderJob) {
-        // The worker only exits when this sender is dropped, so this can't fail
-        // while `self` is alive unless the worker panicked.
-        if self.jobs.send(job).is_err() {
-            tracing::error!("render worker is gone");
+    /// Set the wanted jobs, highest priority first.
+    pub fn set_queue(&self, jobs: impl IntoIterator<Item = RenderJob>) {
+        let mut q = self.shared.queue.lock().unwrap();
+        q.replace(jobs);
+        if !q.jobs.is_empty() {
+            self.shared.ready.notify_all();
         }
     }
 
@@ -56,12 +126,14 @@ impl Renderer {
     }
 }
 
-fn worker(
-    path: PathBuf,
-    jobs: Receiver<RenderJob>,
-    results: Sender<RenderResult>,
-    wake: impl Fn(),
-) {
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        self.shared.queue.lock().unwrap().shutdown = true;
+        self.shared.ready.notify_all();
+    }
+}
+
+fn worker(path: PathBuf, shared: Arc<Shared>, results: Sender<RenderResult>, wake: impl Fn()) {
     let doc = match document::open(&path) {
         Ok(doc) => doc,
         Err(err) => {
@@ -70,25 +142,68 @@ fn worker(
         }
     };
 
-    while let Ok(mut job) = jobs.recv() {
-        // Coalesce: if newer jobs queued up (e.g. during a resize), only the
-        // latest one matters.
-        while let Ok(newer) = jobs.try_recv() {
-            job = newer;
-        }
+    loop {
+        let job = {
+            let mut q = shared.queue.lock().unwrap();
+            loop {
+                if q.shutdown {
+                    return;
+                }
+                if let Some(job) = q.pop() {
+                    break job;
+                }
+                q = shared.ready.wait(q).unwrap();
+            }
+        };
 
         let start = std::time::Instant::now();
-        let image = document::render_page(&doc, job.page, job.scale).map_err(|e| format!("{e:#}"));
+        let image = document::render_page(&doc, job.page, job.scale.scale())
+            .map(|p| ColorImage::from_rgb([p.width, p.height], &p.rgb))
+            .map_err(|e| format!("{e:#}"));
         tracing::debug!(
             page = job.page,
-            scale = job.scale,
+            scale = job.scale.scale(),
             ms = start.elapsed().as_millis() as u64,
             "rendered"
         );
 
-        if results.send(RenderResult { job, image }).is_err() {
-            break;
+        // Send before clearing `in_progress`, so the UI never sees the job as
+        // neither in progress nor delivered (which would re-queue it).
+        let sent = results.send(RenderResult { job, image }).is_ok();
+        shared.queue.lock().unwrap().in_progress.remove(&job);
+        if !sent {
+            return;
         }
         wake();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn job(page: usize) -> RenderJob {
+        RenderJob {
+            page,
+            scale: ScaleKey::from_scale(2.0),
+        }
+    }
+
+    #[test]
+    fn scale_key_rounds_to_hundredths() {
+        assert_eq!(ScaleKey::from_scale(2.0049), ScaleKey::from_scale(2.0));
+        assert_eq!(ScaleKey::from_scale(2.006).scale(), 2.01);
+    }
+
+    #[test]
+    fn replace_drops_stale_jobs_and_skips_in_progress() {
+        let mut q = Queue::default();
+        q.replace([job(1), job(2), job(3)]);
+        assert_eq!(q.pop(), Some(job(1)));
+
+        q.replace([job(1), job(5), job(5), job(4)]);
+        assert_eq!(q.pop(), Some(job(5)));
+        assert_eq!(q.pop(), Some(job(4)));
+        assert_eq!(q.pop(), None);
     }
 }
