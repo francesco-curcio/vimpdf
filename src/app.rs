@@ -8,7 +8,8 @@ use crate::document::DocInfo;
 use crate::input::command::{Command, parse_ex};
 use crate::input::keymap::{KeyState, Keymap};
 use crate::input::{key_tokens, mouse};
-use crate::links::{self, LinkTarget};
+use crate::jumplist::{JumpList, Position};
+use crate::links::{self, HintAction, LinkTarget, PageLink};
 use crate::modes::Mode;
 use crate::render::ScaleKey;
 use crate::search::{MatchId, SearchEvent, SearchRequest};
@@ -25,6 +26,8 @@ const PAGE_MARGIN: f32 = 16.0;
 const MESSAGE_DURATION: Duration = Duration::from_secs(4);
 /// Time constant of smooth keyboard scrolling.
 const SMOOTH_SCROLL_TAU: f32 = 0.05;
+/// Screen points shown above a link destination.
+const LINK_CONTEXT: f32 = 24.0;
 
 struct Message {
     text: String,
@@ -51,6 +54,15 @@ pub struct PdfvApp {
     /// Direction of the last vertical movement, for prefetching.
     scrolling_up: bool,
     first_frame: bool,
+    jumps: JumpList,
+    hints: Option<HintState>,
+}
+
+/// Link hints on screen (`f`): labels, and what has been typed so far.
+struct HintState {
+    action: HintAction,
+    typed: String,
+    hints: Vec<(String, usize, PageLink)>,
 }
 
 impl PdfvApp {
@@ -86,6 +98,8 @@ impl PdfvApp {
             pending_scroll: Vec2::ZERO,
             scrolling_up: false,
             first_frame: true,
+            jumps: JumpList::default(),
+            hints: None,
         };
         app.install_font(ctx, &mut warnings);
         app.report_warnings(warnings);
@@ -186,6 +200,7 @@ impl PdfvApp {
             }
             _ => {
                 self.viewport = None;
+                self.jumps = JumpList::default();
                 self.info(format!("Opened {name}"));
             }
         }
@@ -265,6 +280,16 @@ impl PdfvApp {
 
         // Everything else moves instantly (or not at all).
         self.pending_scroll = Vec2::ZERO;
+        let is_jump = matches!(
+            cmd,
+            Command::GotoFirst
+                | Command::GotoLast
+                | Command::GotoPage(_)
+                | Command::FollowLink(LinkTarget::Internal { .. })
+        );
+        if is_jump && let Some(pos) = self.position() {
+            self.jumps.push(pos);
+        }
         let Some(vp) = self.viewport.as_mut() else {
             return;
         };
@@ -287,10 +312,47 @@ impl PdfvApp {
             Command::ZoomBy { factor, x, y } => vp.zoom_by(factor, x, y),
             Command::FitWidth => vp.fit_width(layout, PAGE_MARGIN),
             Command::FitPage => vp.fit_page(layout, PAGE_MARGIN),
-            Command::FollowLink(LinkTarget::Internal { page, .. }) => {
-                // Exact destination positions come with the jumplist (M5).
+            Command::FollowLink(LinkTarget::Internal { page, x, y }) => {
                 vp.goto_page(layout, page);
+                let r = layout.page(page.min(layout.len() - 1));
+                if let Some(y) = y {
+                    // A little context above the destination (e.g. a heading).
+                    vp.y = r.y + y - LINK_CONTEXT / vp.zoom;
+                }
+                if let Some(x) = x
+                    && (r.x + x < vp.x || r.x + x > vp.x + vp.doc_width())
+                {
+                    vp.x = r.x + x - LINK_CONTEXT / vp.zoom;
+                }
             }
+            Command::Hints(action) => self.start_hints(action),
+            Command::JumpBack(n) => {
+                if let Some(cur) = self.position()
+                    && let Some(pos) = self.jumps.back(cur, n as usize)
+                {
+                    self.goto_position(pos);
+                } else {
+                    self.info("At the oldest jump");
+                }
+            }
+            Command::JumpForward(n) => match self.jumps.forward(n as usize) {
+                Some(pos) => self.goto_position(pos),
+                None => self.info("At the newest jump"),
+            },
+            Command::AwaitMark { .. } => {} // handled by the key state
+            Command::SetMark(c) => {
+                if let Some(pos) = self.position() {
+                    self.jumps.set_mark(c, pos);
+                    self.info(format!("Mark '{c}' set"));
+                }
+            }
+            Command::GotoMark(c) => match (self.jumps.mark(c), self.position()) {
+                (Some(target), Some(cur)) => {
+                    self.jumps.push(cur);
+                    self.goto_position(target);
+                }
+                _ => self.error(format!("Mark '{c}' not set")),
+            },
             Command::FollowLink(LinkTarget::External(uri)) => match links::open_external(&uri) {
                 Ok(()) => self.info(format!("Opening {uri}")),
                 Err(err) => self.error(err),
@@ -348,6 +410,140 @@ impl PdfvApp {
             | Command::HalfPageUp(_)
             | Command::ScreenDown(_)
             | Command::ScreenUp(_) => unreachable!("handled above"),
+        }
+    }
+
+    fn position(&self) -> Option<Position> {
+        let vp = self.viewport.as_ref()?;
+        let layout = &self.view.layout;
+        let page = vp.current_page(layout);
+        Some(Position {
+            page,
+            offset: vp.y - layout.page(page).y,
+            x: vp.x,
+        })
+    }
+
+    fn goto_position(&mut self, pos: Position) {
+        let Some(vp) = self.viewport.as_mut() else {
+            return;
+        };
+        let layout = &self.view.layout;
+        let page = pos.page.min(layout.len() - 1);
+        vp.y = layout.page(page).y + pos.offset;
+        vp.x = pos.x;
+        self.pending_scroll = Vec2::ZERO;
+    }
+
+    /// Label every link on screen (`f`, `yf`).
+    fn start_hints(&mut self, action: HintAction) {
+        let Some(vp) = &self.viewport else { return };
+        let layout = &self.view.layout;
+        let (vx0, vy0) = (vp.x, vp.y);
+        let (vx1, vy1) = (vp.x + vp.doc_width(), vp.y + vp.doc_height());
+        let mut visible = Vec::new();
+        for page in layout.pages_in(vy0, vy1) {
+            let r = layout.page(page);
+            for link in self.view.links.get(page).into_iter().flatten() {
+                let (x0, y0) = (r.x + link.x0, r.y + link.y0);
+                let (x1, y1) = (r.x + link.x1, r.y + link.y1);
+                if x1 >= vx0 && x0 <= vx1 && y1 >= vy0 && y0 <= vy1 {
+                    visible.push((page, link.clone()));
+                }
+            }
+        }
+        if visible.is_empty() {
+            return self.info("No links on screen");
+        }
+        // Reading order: top to bottom, then left to right.
+        visible.sort_by(|(pa, a), (pb, b)| {
+            (pa, a.y0.round() as i32, a.x0.round() as i32).cmp(&(
+                pb,
+                b.y0.round() as i32,
+                b.x0.round() as i32,
+            ))
+        });
+        let labels = links::hint_labels(visible.len());
+        for (label, (page, link)) in labels.iter().zip(&visible) {
+            tracing::trace!(label, page = page + 1, target = ?link.target, "hint");
+        }
+        self.hints = Some(HintState {
+            action,
+            typed: String::new(),
+            hints: labels
+                .into_iter()
+                .zip(visible)
+                .map(|(l, (p, link))| (l, p, link))
+                .collect(),
+        });
+        self.keys.reset();
+        self.mode = Mode::Hints;
+    }
+
+    /// A key typed in hint mode. Returns a command once a label is complete.
+    fn hint_key(&mut self, ctx: &egui::Context, tok: &str) -> Option<Command> {
+        let state = self.hints.as_mut()?;
+        match tok {
+            "<Esc>" => {}
+            "<BS>" => {
+                state.typed.pop();
+                return None;
+            }
+            t if t.chars().count() == 1 => {
+                state.typed.push_str(&t.to_lowercase());
+                let matching: Vec<&(String, usize, PageLink)> = state
+                    .hints
+                    .iter()
+                    .filter(|(l, _, _)| l.starts_with(&state.typed))
+                    .collect();
+                match matching.as_slice() {
+                    [] => {}
+                    [(label, _, link)] if *label == state.typed => {
+                        let (action, target) = (state.action, link.target.clone());
+                        self.hints = None;
+                        self.mode = Mode::Normal;
+                        return match action {
+                            HintAction::Follow => Some(Command::FollowLink(target)),
+                            HintAction::CopyAddress => {
+                                let text = match &target {
+                                    LinkTarget::External(uri) => uri.clone(),
+                                    LinkTarget::Internal { page, .. } => {
+                                        format!("page {}", page + 1)
+                                    }
+                                };
+                                ctx.copy_text(text.clone());
+                                self.info(format!("Copied {text}"));
+                                None
+                            }
+                        };
+                    }
+                    _ => return None, // keep typing
+                }
+            }
+            _ => return None,
+        }
+        // Esc, or a label that matches nothing.
+        self.hints = None;
+        self.mode = Mode::Normal;
+        None
+    }
+
+    fn draw_hints(&self, painter: &egui::Painter, area: Rect, vp: &Viewport) {
+        let Some(state) = &self.hints else { return };
+        let font = FontId::monospace(self.config.font_size.max(11.0) - 1.0);
+        let bg = color32(self.config.colors.hint_background);
+        let layout = &self.view.layout;
+        for (label, page, link) in &state.hints {
+            if !label.starts_with(&state.typed) {
+                continue;
+            }
+            let r = layout.page(*page);
+            let (x, y) = vp.to_view(r.x + link.x0, r.y + link.y0);
+            let pos = area.min + Vec2::new(x, y);
+            let galley = painter.layout_no_wrap(label.to_uppercase(), font.clone(), Color32::BLACK);
+            let rect = Rect::from_min_size(pos, galley.size()).expand2(Vec2::new(3.0, 1.0));
+            painter.rect_filled(rect, 3.0, bg);
+            painter.galley(pos, galley, Color32::BLACK);
         }
     }
 
@@ -420,6 +616,13 @@ impl PdfvApp {
         let (x0, y0) = (page.x + first.x0, page.y + first.y0);
         let (x1, y1) = (page.x + first.x1, page.y + first.y1);
         if y0 < vp.y || y1 > vp.y + vp.doc_height() {
+            let layout = &self.view.layout;
+            let cur = vp.current_page(layout);
+            self.jumps.push(Position {
+                page: cur,
+                offset: vp.y - layout.page(cur).y,
+                x: vp.x,
+            });
             vp.y = y0 - vp.doc_height() / 3.0;
         }
         if x0 < vp.x || x1 > vp.x + vp.doc_width() {
@@ -474,6 +677,13 @@ impl PdfvApp {
     /// Key presses → commands, according to the mode.
     fn keyboard_commands(&mut self, ctx: &egui::Context) -> Vec<Command> {
         // A focused text field (command line, toolbar page box) gets the keys.
+        if self.mode == Mode::Hints {
+            let events = ctx.input(|i| i.events.clone());
+            return key_tokens(&events)
+                .iter()
+                .filter_map(|tok| self.hint_key(ctx, tok))
+                .collect();
+        }
         if self.mode != Mode::Normal || ctx.egui_wants_keyboard_input() {
             return Vec::new();
         }
@@ -493,6 +703,15 @@ impl PdfvApp {
             let (prefill, search) = match cmd {
                 Command::EnterCommandLine(p) => (p, false),
                 Command::EnterSearch(p) => (p, true),
+                Command::Hints(action) => {
+                    // Label keys typed in the same frame as 'f' pick a hint.
+                    self.start_hints(action);
+                    while self.mode == Mode::Hints {
+                        let Some(tok) = tokens.next() else { break };
+                        commands.extend(self.hint_key(ctx, &tok));
+                    }
+                    continue;
+                }
                 other => {
                     commands.push(other);
                     continue;
@@ -598,7 +817,11 @@ impl eframe::App for PdfvApp {
         vp.clamp(&self.view.layout);
         if vp.y != y_before {
             self.scrolling_up = vp.y < y_before;
-            tracing::trace!(page = vp.centre_page(&self.view.layout) + 1, "moved");
+            tracing::trace!(
+                page = vp.centre_page(&self.view.layout) + 1,
+                y = vp.y,
+                "moved"
+            );
         }
         let vp = vp.clone();
         if vp.zoom != zoom_before && !self.config.statusbar {
@@ -620,6 +843,7 @@ impl eframe::App for PdfvApp {
         let page_color = color32(self.config.colors.page_background);
         self.view.draw(&painter, area, &vp, scale, page_color);
         self.draw_search_highlights(&painter, area, &vp);
+        self.draw_hints(&painter, area, &vp);
 
         // Bars and overlays.
         if self
@@ -660,7 +884,7 @@ impl eframe::App for PdfvApp {
                     ui_commands.push(Command::Search(line));
                 }
             },
-            (Some(rect), Mode::Normal) => {
+            (Some(rect), Mode::Normal | Mode::Hints) => {
                 let file = self.view.file_name();
                 let status = statusbar::Status {
                     mode: self.mode.label(),

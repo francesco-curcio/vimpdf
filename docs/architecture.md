@@ -91,6 +91,16 @@ back, optional case folding) and maps matches back to character indices;
 `PageText::rects` gives one rectangle per line of a match. The UI keeps
 results in `search::SearchState` (per document) for `n`/`N` and highlighting.
 
+## Links, hints, jumps
+
+Links are loaded once per document (`links.rs`) with page-relative rectangles
+and, for internal links, the destination page and point. `f` collects the
+links intersecting the view, sorts them in reading order and gives them
+prefix-free labels (`links::hint_labels`); hint mode (`Mode::Hints`) consumes
+keys until a label is complete. `jumplist.rs` keeps the jump history
+(browser-like: a new jump drops the forward entries) and the marks, both as
+page + offset positions. Every jump command records the position first.
+
 ## Config
 
 `config.rs`: every option goes through `Config::set(key, toml::Value)`, used
@@ -113,6 +123,7 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `links.rs` | Link types, loader thread, safe external opening |
 | `text.rs` | Page text model, matching, match rectangles |
 | `search.rs` | Search worker and result state |
+| `jumplist.rs` | Jump history and marks |
 | `config.rs` | Options, TOML loading, `:set` |
 | `modes.rs` | Input modes |
 | `ui/` | Status bar, command line, toolbar, help overlay, font lookup |

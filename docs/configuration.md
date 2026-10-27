@@ -105,6 +105,9 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `search_prompt [text]` | `/` |
 | `search <text>` | — (`:search foo` searches without opening the prompt) |
 | `search_next [n]`, `search_prev [n]` | `n`, `N` |
+| `hints`, `hints_copy` | `f`, `yf` |
+| `jump_back [n]`, `jump_forward [n]` | `<C-o>`, `<C-i>` |
+| `set_mark [letter]`, `goto_mark [letter]` | `m`, `'` and `` ` `` (without a letter they wait for the next key) |
 | `toggle_toolbar`, `toggle_statusbar` | `<C-t>`, — |
 | `toggle_help` | `?` |
 | `toggle_fullscreen` | `<C-F>` |

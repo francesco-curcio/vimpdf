@@ -208,6 +208,13 @@ impl Keymap {
             (":", EnterCommandLine(String::new())),
             ("/", EnterSearch(String::new())),
             ("n", SearchNext(1)),
+            ("f", Hints(crate::links::HintAction::Follow)),
+            ("yf", Hints(crate::links::HintAction::CopyAddress)),
+            ("<C-o>", JumpBack(1)),
+            ("<C-i>", JumpForward(1)),
+            ("m", AwaitMark { set: true }),
+            ("'", AwaitMark { set: false }),
+            ("`", AwaitMark { set: false }),
             ("N", SearchPrev(1)),
             ("<C-t>", ToggleToolbar),
             ("?", ToggleHelp),
@@ -227,11 +234,21 @@ impl Keymap {
 pub struct KeyState {
     count: Count,
     pending: KeySeq,
+    /// After `m` / `'`: the next key names a mark.
+    awaiting_mark: Option<(bool, String)>,
 }
 
 impl KeyState {
     /// Feed one key token. Returns a command once a binding is complete.
     pub fn feed(&mut self, key: &str, keymap: &Keymap) -> Option<Command> {
+        if let Some((set, _)) = self.awaiting_mark.take() {
+            let mut chars = key.chars();
+            return match (chars.next(), chars.next()) {
+                (Some(c), None) if set => Some(Command::SetMark(c)),
+                (Some(c), None) => Some(Command::GotoMark(c)),
+                _ => None, // Esc or a special key cancels
+            };
+        }
         if self.pending.is_empty() && self.count.feed(key) {
             return None;
         }
@@ -243,6 +260,12 @@ impl KeyState {
         self.pending.push(key.to_owned());
         match keymap.lookup(&self.pending) {
             Lookup::Prefix => None,
+            Lookup::Exact(Command::AwaitMark { set }) => {
+                self.awaiting_mark = Some((*set, self.pending.concat()));
+                self.count.clear();
+                self.pending.clear();
+                None
+            }
             Lookup::Exact(cmd) => {
                 let cmd = cmd.clone();
                 let count = self.count.take();
@@ -262,16 +285,22 @@ impl KeyState {
     /// The count and keys typed so far, for the status bar ("12", "g").
     pub fn pending_display(&self) -> String {
         let count = self.count.get().map(|n| n.to_string()).unwrap_or_default();
-        count + &self.pending.concat()
+        let mark = self
+            .awaiting_mark
+            .as_ref()
+            .map(|(_, k)| k.as_str())
+            .unwrap_or("");
+        count + &self.pending.concat() + mark
     }
 
     pub fn is_pending(&self) -> bool {
-        self.count.get().is_some() || !self.pending.is_empty()
+        self.count.get().is_some() || !self.pending.is_empty() || self.awaiting_mark.is_some()
     }
 
     pub fn reset(&mut self) {
         self.count.clear();
         self.pending.clear();
+        self.awaiting_mark = None;
     }
 }
 
@@ -325,6 +354,27 @@ mod tests {
         assert_eq!(
             feed_all(&mut st, &km, &["3", "g", "g"]),
             vec![Command::GotoPage(3)]
+        );
+    }
+
+    #[test]
+    fn marks_take_the_next_key() {
+        let km = Keymap::default_normal();
+        let mut st = KeyState::default();
+        assert_eq!(feed_all(&mut st, &km, &["m"]), vec![]);
+        assert_eq!(st.pending_display(), "m");
+        assert_eq!(feed_all(&mut st, &km, &["a"]), vec![Command::SetMark('a')]);
+        assert_eq!(
+            feed_all(&mut st, &km, &["'", "a"]),
+            vec![Command::GotoMark('a')]
+        );
+        assert_eq!(
+            feed_all(&mut st, &km, &["'", "'"]),
+            vec![Command::GotoMark('\'')]
+        );
+        assert_eq!(
+            feed_all(&mut st, &km, &["m", "<Esc>", "j"]),
+            vec![Command::ScrollDown(1)]
         );
     }
 

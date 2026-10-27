@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::links::LinkTarget;
+use crate::links::{HintAction, LinkTarget};
 
 /// Every user action, whichever input produced it: key bindings, the `:`
 /// command line, the mouse, toolbar buttons.
@@ -41,6 +41,17 @@ pub enum Command {
     FitWidth,
     FitPage,
     FollowLink(LinkTarget),
+    /// Show labels on visible links; typing one follows (or copies) it.
+    Hints(HintAction),
+    /// `<C-o>` / `<C-i>`: move through the jump history.
+    JumpBack(u32),
+    JumpForward(u32),
+    /// Wait for a letter, then set (`set: true`) or go to that mark.
+    AwaitMark {
+        set: bool,
+    },
+    SetMark(char),
+    GotoMark(char),
     /// Open the `:` command line, optionally prefilled.
     EnterCommandLine(String),
     /// Open the `/` search line, optionally prefilled.
@@ -84,6 +95,8 @@ const COUNTED: &[(&str, MakeCounted)] = &[
     ("prev_page", Command::PrevPage),
     ("zoom_in", Command::ZoomIn),
     ("zoom_out", Command::ZoomOut),
+    ("jump_back", Command::JumpBack),
+    ("jump_forward", Command::JumpForward),
     ("search_next", Command::SearchNext),
     ("search_prev", Command::SearchPrev),
 ];
@@ -95,6 +108,10 @@ const SIMPLE: &[(&str, Command)] = &[
     ("zoom_reset", Command::ZoomReset),
     ("fit_width", Command::FitWidth),
     ("fit_page", Command::FitPage),
+    ("hints", Command::Hints(HintAction::Follow)),
+    ("hints_copy", Command::Hints(HintAction::CopyAddress)),
+    ("set_mark", Command::AwaitMark { set: true }),
+    ("goto_mark", Command::AwaitMark { set: false }),
     ("toggle_statusbar", Command::ToggleStatusbar),
     ("toggle_toolbar", Command::ToggleToolbar),
     ("toggle_help", Command::ToggleHelp),
@@ -123,6 +140,8 @@ impl Command {
             ZoomIn(k) => ZoomIn(k * n),
             ZoomOut(k) => ZoomOut(k * n),
             SearchNext(k) => SearchNext(k * n),
+            JumpBack(k) => JumpBack(k * n),
+            JumpForward(k) => JumpForward(k * n),
             SearchPrev(k) => SearchPrev(k * n),
             GotoFirst | GotoLast | GotoPage(_) => GotoPage(n as usize),
             other => other,
@@ -146,6 +165,18 @@ impl Command {
                     .ok_or_else(|| format!("'{name}' takes a positive count, got '{a}'"))?,
             };
             return Ok(make(n));
+        }
+        let mark_letter = |a: &str| {
+            let mut chars = a.chars();
+            match (chars.next(), chars.next()) {
+                (Some(c), None) => Ok(c),
+                _ => Err(format!("'{name}' takes one letter, got '{a}'")),
+            }
+        };
+        match (name, arg) {
+            ("set_mark", Some(a)) => return mark_letter(a).map(Command::SetMark),
+            ("goto_mark", Some(a)) => return mark_letter(a).map(Command::GotoMark),
+            _ => {}
         }
         if let Some((_, cmd)) = SIMPLE.iter().find(|(n, _)| *n == name) {
             return match arg {
@@ -190,6 +221,8 @@ impl Command {
             Command::EnterSearch(s) if s.is_empty() => "search_prompt".into(),
             Command::EnterSearch(s) => format!("search_prompt {s}"),
             Command::Search(s) => format!("search {s}"),
+            Command::SetMark(c) => format!("set_mark {c}"),
+            Command::GotoMark(c) => format!("goto_mark {c}"),
             Command::Open(p) => format!("open {}", p.display()),
             other => format!("{other:?}"),
         }
@@ -200,7 +233,8 @@ impl Command {
         match self {
             ScrollDown(n) | ScrollUp(n) | ScrollLeft(n) | ScrollRight(n) | HalfPageDown(n)
             | HalfPageUp(n) | ScreenDown(n) | ScreenUp(n) | NextPage(n) | PrevPage(n)
-            | ZoomIn(n) | ZoomOut(n) | SearchNext(n) | SearchPrev(n) => Some(*n),
+            | ZoomIn(n) | ZoomOut(n) | SearchNext(n) | SearchPrev(n) | JumpBack(n)
+            | JumpForward(n) => Some(*n),
             _ => None,
         }
     }
@@ -301,6 +335,11 @@ mod tests {
             "toggle_help",
             "search_prompt",
             "search_next 2",
+            "hints",
+            "hints_copy",
+            "jump_back",
+            "set_mark",
+            "set_mark a",
             "command_line",
             "quit",
         ] {

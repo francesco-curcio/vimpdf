@@ -6,6 +6,8 @@ pub enum Mode {
     Command,
     /// Typing a `/` search.
     Search,
+    /// Link hint labels on screen (`f`).
+    Hints,
 }
 
 impl Mode {
@@ -14,6 +16,7 @@ impl Mode {
             Mode::Normal => "NORMAL",
             Mode::Command => "COMMAND",
             Mode::Search => "SEARCH",
+            Mode::Hints => "HINTS",
         }
     }
 }

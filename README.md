@@ -7,7 +7,8 @@ and UI use [egui/eframe](https://github.com/emilk/egui).
 
 Status: in development — see [PLAN.md](PLAN.md) for the roadmap. Done so far:
 continuous scrolling, vim motions with counts, links, zoom and fit modes,
-status bar, `:` command line, config file, toolbar, help overlay, search.
+status bar, `:` command line, config file, toolbar, help overlay, search,
+link hints, jumplist and marks.
 
 Documentation:
 
@@ -66,6 +67,11 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `a` | Fit page (kept when the window is resized; `J`/`K` keep pages centred) |
 | `/` | Search (Enter runs it; an empty search repeats the last one) |
 | `n` / `N` | Next / previous match (wraps; `3n` skips ahead) |
+| `f` | Link hints: a label appears on every link on screen; type it to follow the link |
+| `yf` | Link hints, but copy the link's address instead of following it |
+| `<C-o>` / `<C-i>` | Back / forward through the jump history |
+| `m<letter>` / `'<letter>` | Set a mark / jump to it (`` ` `` works like `'`) |
+| `''` | Back to where the last jump started |
 | `:` | Command line |
 | `?` | Help overlay: active keys, mouse actions, commands |
 | `<C-t>` | Toggle the toolbar |
@@ -82,13 +88,22 @@ Every mouse action also has a key.
 | --- | --- | --- |
 | Wheel / two-finger scroll | Scroll | `j` `k` `h` `l` |
 | Pinch, or `Cmd` + wheel | Zoom, anchored at the pointer | `+` `-` |
-| Click a link | Follow it | `f` (coming in M5) |
+| Click a link | Follow it | `f` + label |
 | Click the page number in the status bar | Go to page | `:<n>` |
 | Toolbar buttons | Zoom, fit, go to page, help | `+` `-` `s` `a` `:<n>` `?` |
 
-Internal links jump to their target page. External links open in the default
-browser — only `http(s)` and `mailto` links, so a PDF can't use a link to
-launch local files or applications.
+Internal links jump to the exact destination (a citation lands on the
+reference, with a little context above it). External links open in the
+default browser — only `http(s)` and `mailto` links, so a PDF can't use a link
+to launch local files or applications.
+
+### Jumps and marks
+
+Every jump — following a link, `gg`, `G`, `:<n>`, a search moving the view, a
+mark — records where you were. `<C-o>` goes back, `<C-i>` forward again, so
+after checking a citation `<C-o>` returns exactly to where you were reading.
+`ma` remembers the current position as mark `a`; `'a` jumps to it. Positions
+are stored as page + offset, so they survive a reload.
 
 ### Command line
 

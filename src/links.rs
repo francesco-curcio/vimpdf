@@ -64,6 +64,36 @@ pub fn spawn_loader(
     rx
 }
 
+/// Characters used for hint labels, easiest to type first.
+const HINT_CHARS: &[char] = &['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'];
+
+/// `n` distinct hint labels, all the same length so none is a prefix of
+/// another ("a".."l" for up to 9, then "aa", "as", …).
+pub fn hint_labels(n: usize) -> Vec<String> {
+    let base = HINT_CHARS.len();
+    let mut len = 1;
+    while base.pow(len as u32) < n {
+        len += 1;
+    }
+    (0..n)
+        .map(|mut i| {
+            let mut label = vec![' '; len];
+            for slot in label.iter_mut().rev() {
+                *slot = HINT_CHARS[i % base];
+                i /= base;
+            }
+            label.into_iter().collect()
+        })
+        .collect()
+}
+
+/// What to do with the chosen link in hint mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HintAction {
+    Follow,
+    CopyAddress,
+}
+
 /// Open an external link in the default handler. Only web and mail links are
 /// opened: a PDF could otherwise launch arbitrary local files or apps.
 pub fn open_external(uri: &str) -> Result<(), String> {
@@ -89,6 +119,18 @@ pub fn open_external(uri: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hint_labels_are_prefix_free() {
+        assert_eq!(hint_labels(3), vec!["a", "s", "d"]);
+        let many = hint_labels(30);
+        assert_eq!(many.len(), 30);
+        assert!(many.iter().all(|l| l.len() == 2));
+        assert_eq!(&many[..2], &["aa", "as"]);
+        let unique: std::collections::HashSet<_> = many.iter().collect();
+        assert_eq!(unique.len(), 30);
+        assert!(hint_labels(0).is_empty());
+    }
 
     #[test]
     fn refuses_non_web_links() {

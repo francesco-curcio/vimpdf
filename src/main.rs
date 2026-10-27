@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod document;
 mod input;
+mod jumplist;
 mod layout;
 mod links;
 mod modes;
