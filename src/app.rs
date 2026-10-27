@@ -1015,5 +1015,6 @@ impl eframe::App for VimpdfApp {
 
     fn on_exit(&mut self) {
         self.save_state();
+        crate::annotate::remove_own_work_dirs();
     }
 }

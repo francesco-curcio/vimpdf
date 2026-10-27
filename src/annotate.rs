@@ -221,6 +221,53 @@ struct EditorState {
     unsaved_other: bool,
 }
 
+/// Working copies live in `<temp>/vimpdf-work/<pid>-<n>`: one folder per
+/// editing session (each opened document), so sessions never clean up each
+/// other's files.
+fn work_root() -> PathBuf {
+    std::env::temp_dir().join("vimpdf-work")
+}
+
+fn new_work_dir() -> PathBuf {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    work_root().join(format!("{}-{n}", std::process::id()))
+}
+
+/// Remove this process's working copies (on quit: the editor threads may not
+/// get to clean up before the process exits).
+pub fn remove_own_work_dirs() {
+    let prefix = format!("{}-", std::process::id());
+    remove_work_dirs(&work_root(), |name, _| name.starts_with(&prefix));
+}
+
+/// Remove working copies left by earlier sessions that didn't quit cleanly
+/// (crash, kill): folders untouched for longer than `max_age`. A running
+/// instance writes to its folder on every edit, so recent ones are kept.
+pub fn remove_stale_work_dirs(max_age: std::time::Duration) {
+    remove_work_dirs(&work_root(), |_, age| age.is_some_and(|a| a > max_age));
+}
+
+fn remove_work_dirs(root: &Path, remove: impl Fn(&str, Option<std::time::Duration>) -> bool) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let age = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok());
+        if remove(&name, age) {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+    // Leave no empty `vimpdf-work` folder behind.
+    let _ = std::fs::remove_dir(root);
+}
+
 pub fn rgb_to_color(c: [u8; 3]) -> AnnotationColor {
     AnnotationColor::Rgb {
         red: f32::from(c[0]) / 255.0,
@@ -270,7 +317,7 @@ impl EditorState {
                 Ok((b.x0, b.y0))
             })
             .collect::<Result<Vec<_>, mupdf::Error>>()?;
-        let work_dir = std::env::temp_dir().join(format!("vimpdf-work-{}", std::process::id()));
+        let work_dir = new_work_dir();
         Ok(Self {
             doc,
             original: path.to_owned(),
@@ -722,6 +769,25 @@ mod tests {
 
     fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> TextRect {
         TextRect { x0, y0, x1, y1 }
+    }
+
+    #[test]
+    fn work_dirs_are_per_session_and_removed_on_quit() {
+        let a = new_work_dir();
+        let b = new_work_dir();
+        assert_ne!(a, b);
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        // A fresh folder from another process is kept by the stale sweep.
+        let other = work_root().join("1-0");
+        std::fs::create_dir_all(&other).unwrap();
+        remove_stale_work_dirs(std::time::Duration::from_secs(3600));
+        assert!(a.exists() && other.exists());
+        remove_own_work_dirs();
+        assert!(!a.exists() && !b.exists());
+        assert!(other.exists(), "other processes' folders are left alone");
+        std::fs::remove_dir_all(&other).unwrap();
+        let _ = std::fs::remove_dir(work_root());
     }
 
     /// Print the annotations of the PDF named by `VIMPDF_ANNOT_DUMP`.

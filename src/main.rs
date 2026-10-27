@@ -61,6 +61,9 @@ fn main() -> ExitCode {
 }
 
 fn run(args: Args) -> Result<()> {
+    // Working copies from sessions that didn't quit cleanly.
+    annotate::remove_stale_work_dirs(std::time::Duration::from_secs(24 * 3600));
+
     // A file given on the command line is checked before any window opens,
     // so mistakes are reported in the terminal.
     let initial = match &args.file {
