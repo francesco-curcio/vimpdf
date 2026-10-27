@@ -16,6 +16,10 @@ pub struct FileState {
     pub zoom: f32,
     pub fit: FitMode,
     pub marks: Vec<(char, Position)>,
+    /// The document's fingerprint, to recognise other copies of it.
+    pub fingerprint: Option<String>,
+    /// Annotations saved in this copy.
+    pub annotations: usize,
 }
 
 pub fn state_dir() -> Option<PathBuf> {
@@ -83,6 +87,13 @@ impl FileState {
             .map(|(c, p)| (c.to_string(), position_value(*p)))
             .collect();
         t.insert("marks".into(), Value::Table(marks));
+        if let Some(fp) = &self.fingerprint {
+            t.insert("fingerprint".into(), Value::String(fp.clone()));
+        }
+        t.insert(
+            "annotations".into(),
+            Value::Integer(self.annotations as i64),
+        );
         t.to_string()
     }
 
@@ -113,8 +124,40 @@ impl FileState {
             zoom: t.get("zoom")?.as_float()? as f32,
             fit,
             marks,
+            fingerprint: t
+                .get("fingerprint")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            annotations: t
+                .get("annotations")
+                .and_then(Value::as_integer)
+                .and_then(|n| usize::try_from(n).ok())
+                .unwrap_or(0),
         })
     }
+}
+
+/// Other copies of a document (same fingerprint, different path) that still
+/// exist, most recently read first.
+pub fn find_copies(dir: &Path, fingerprint: &str, except: &Path) -> Vec<(PathBuf, FileState)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(std::time::SystemTime, PathBuf, FileState)> = entries
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
+        .filter_map(|e| {
+            let modified = e.metadata().ok()?.modified().ok()?;
+            let text = std::fs::read_to_string(e.path()).ok()?;
+            let table: Table = text.parse().ok()?;
+            let path = PathBuf::from(table.get("path")?.as_str()?);
+            let state = FileState::from_toml(&text)?;
+            (state.fingerprint.as_deref() == Some(fingerprint) && path != except && path.exists())
+                .then_some((modified, path, state))
+        })
+        .collect();
+    found.sort_by_key(|f| std::cmp::Reverse(f.0));
+    found.into_iter().map(|(_, p, s)| (p, s)).collect()
 }
 
 /// Recently read files (newest first) that still exist, from the state files.
@@ -180,10 +223,23 @@ mod tests {
             zoom: 1.75,
             fit: FitMode::Page,
             marks: vec![('\'', pos(1, 10.0)), ('a', pos(3, 0.0))],
+            fingerprint: Some("id:abc".into()),
+            annotations: 3,
         };
         save(&dir, doc, &state).unwrap();
-        assert_eq!(load(&dir, doc), Some(state));
+        assert_eq!(load(&dir, doc), Some(state.clone()));
         assert_eq!(load(&dir, Path::new("/papers/other.pdf")), None);
+
+        // A copy elsewhere is found by fingerprint (only if it exists).
+        let real = dir.join("real.pdf");
+        std::fs::write(&real, b"x").unwrap();
+        save(&dir, &real, &state).unwrap();
+        let copies = find_copies(&dir, "id:abc", Path::new("/new/copy.pdf"));
+        assert_eq!(copies.len(), 1, "the non-existent /papers path is skipped");
+        assert_eq!(copies[0].0, real);
+        assert_eq!(copies[0].1.annotations, 3);
+        assert!(find_copies(&dir, "id:abc", &real).is_empty(), "not itself");
+        assert!(find_copies(&dir, "id:zzz", Path::new("/x")).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -34,6 +34,8 @@ pub(super) struct Persistence {
     /// change events that don't change it (vimpdf's own saves, events macOS
     /// replays from before the file was opened) are ignored.
     stamp: Option<(u64, std::time::SystemTime)>,
+    /// Another copy of this document that has saved annotations.
+    pub annotated_copy: Option<(PathBuf, usize)>,
     reload_due: Option<Instant>,
     last_saved: Option<(Instant, FileState)>,
 }
@@ -108,11 +110,23 @@ impl VimpdfApp {
 
     fn file_state(&self) -> Option<FileState> {
         let vp = self.viewport.as_ref()?;
+        // Annotations saved in the file: the current list unless some are
+        // unsaved, in which case keep what was recorded before.
+        let annotations = if self.annots.unsaved {
+            self.persist
+                .last_saved
+                .as_ref()
+                .map_or(0, |(_, s)| s.annotations)
+        } else {
+            self.annots.list.len()
+        };
         Some(FileState {
             position: self.position()?,
             zoom: vp.zoom,
             fit: vp.fit,
             marks: self.jumps.marks(),
+            fingerprint: self.view.fingerprint.clone(),
+            annotations,
         })
     }
 
@@ -149,7 +163,30 @@ impl VimpdfApp {
 
     /// Restore the saved zoom, fit, position and marks of the open file.
     pub(super) fn restore_state(&mut self) {
-        let Some(saved) = state::state_dir().and_then(|d| state::load(&d, &self.view.path)) else {
+        self.persist.annotated_copy = None;
+        let Some(dir) = state::state_dir() else {
+            return;
+        };
+        let own = state::load(&dir, &self.view.path);
+        let copies = match &self.view.fingerprint {
+            Some(fp) => state::find_copies(&dir, fp, &self.view.path),
+            None => Vec::new(),
+        };
+        // Another copy of the same paper with saved annotations (e.g. this is
+        // a fresh download of a paper you annotated before).
+        let own_annotations = own.as_ref().map_or(0, |s| s.annotations);
+        // Prefer a permanent copy over a temporary one (which may vanish).
+        if own_annotations == 0
+            && let Some((path, s)) = copies
+                .iter()
+                .filter(|(_, s)| s.annotations > 0)
+                .min_by_key(|(p, _)| crate::platform::is_temporary(p))
+        {
+            self.persist.annotated_copy = Some((path.clone(), s.annotations));
+        }
+        let from_copy = own.is_none() && !copies.is_empty();
+        let Some(saved) = own.or_else(|| copies.first().map(|(_, s)| s.clone())) else {
+            self.announce_annotated_copy(false);
             return;
         };
         let layout = &self.view.layout;
@@ -167,9 +204,44 @@ impl VimpdfApp {
         tracing::debug!(
             page = saved.position.page + 1,
             zoom = saved.zoom,
+            from_copy,
             "restored reading position"
         );
-        self.persist.last_saved = Some((Instant::now(), saved));
+        if from_copy {
+            // A different file: don't treat its state as ours already saved.
+            self.persist.last_saved = None;
+        } else {
+            self.persist.last_saved = Some((Instant::now(), saved));
+        }
+        self.announce_annotated_copy(from_copy);
+    }
+
+    fn announce_annotated_copy(&mut self, restored_from_copy: bool) {
+        match (&self.persist.annotated_copy, restored_from_copy) {
+            (Some((path, n)), _) => {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                self.info(format!(
+                    "You annotated another copy of this paper ({name}, {n} annotations): :annotated opens it"
+                ));
+            }
+            (None, true) => self.info("Restored your place from another copy of this paper"),
+            (None, false) => {}
+        }
+    }
+
+    /// `:annotated`.
+    pub(super) fn open_annotated_copy(&mut self, ctx: &egui::Context) {
+        match self.persist.annotated_copy.clone() {
+            Some((path, _)) => {
+                if !self.has_unsaved() {
+                    self.open(ctx, path, true);
+                }
+            }
+            None => self.info("No other annotated copy of this paper is known"),
+        }
     }
 
     // --- Reloading ------------------------------------------------------

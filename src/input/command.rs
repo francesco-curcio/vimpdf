@@ -97,6 +97,12 @@ pub enum Command {
     /// Save annotations: into the file (`None`) or a copy.
     Write(Option<PathBuf>),
     WriteQuit,
+    /// `:w!`: save into the file even if it's a temporary copy.
+    WriteForce,
+    /// `:saveas <path>`: save a copy with the annotations and switch to it.
+    SaveAs(PathBuf),
+    /// Open the other copy of this document that has annotations.
+    OpenAnnotatedCopy,
     /// Quit even with unsaved annotations.
     ForceQuit,
     /// Reload, discarding unsaved annotations.
@@ -369,6 +375,10 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
     let cmd = match word {
         "q" | "quit" | "qa" => Command::Quit,
         "q!" | "quit!" | "qa!" => Command::ForceQuit,
+        "w!" | "write!" => Command::WriteForce,
+        "sav" | "saveas" if rest.is_empty() => return Err(":saveas needs a file path".into()),
+        "sav" | "saveas" => Command::SaveAs(expand_tilde(rest)),
+        "annotated" => Command::OpenAnnotatedCopy,
         "w" | "write" if rest.is_empty() => Command::Write(None),
         "w" | "write" => Command::Write(Some(expand_tilde(rest))),
         "wq" | "x" | "xit" => Command::WriteQuit,
@@ -488,6 +498,13 @@ mod tests {
             Ok(Some(Command::Write(Some("/tmp/copy.pdf".into()))))
         );
         assert_eq!(parse_ex("wq"), Ok(Some(Command::WriteQuit)));
+        assert_eq!(parse_ex("w!"), Ok(Some(Command::WriteForce)));
+        assert_eq!(
+            parse_ex("saveas ~/x.pdf").map(|c| matches!(c, Some(Command::SaveAs(_)))),
+            Ok(true)
+        );
+        assert!(parse_ex("saveas").is_err());
+        assert_eq!(parse_ex("annotated"), Ok(Some(Command::OpenAnnotatedCopy)));
         assert_eq!(parse_ex("e!"), Ok(Some(Command::Revert)));
         assert_eq!(parse_ex("redact"), Ok(Some(Command::ApplyRedactions(None))));
         assert_eq!(

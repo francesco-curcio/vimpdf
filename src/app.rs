@@ -252,7 +252,11 @@ impl VimpdfApp {
             (true, Some((page, offset)), Some(vp)) => {
                 let page = page.min(self.view.page_count() - 1);
                 vp.y = self.view.layout.page(page).y + offset;
-                self.info(format!("Reloaded {name}"));
+                if same_file {
+                    self.info(format!("Reloaded {name}"));
+                } else {
+                    self.info(format!("Opened {name} at the same place"));
+                }
             }
             _ => {
                 self.viewport = None;
@@ -484,6 +488,9 @@ impl VimpdfApp {
             Command::DeleteAnnot { page, xref } => self.delete_annot(page, xref),
             Command::Write(path) => self.write(path),
             Command::WriteQuit => self.write_quit(ctx),
+            Command::WriteForce => self.write_unchecked(None),
+            Command::SaveAs(path) => self.save_as(path),
+            Command::OpenAnnotatedCopy => self.open_annotated_copy(ctx),
             Command::ForceQuit => self.force_quit(ctx),
             Command::RedactSelection => self.redact_selection(),
             Command::RedactArea => self.start_redact_area(),

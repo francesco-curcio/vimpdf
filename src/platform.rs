@@ -14,6 +14,23 @@ type Waker = Box<dyn Fn() + Send>;
 static OPENED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 static WAKE: Mutex<Option<Waker>> = Mutex::new(None);
 
+/// Whether `path` is in a temporary folder (where browsers put files they
+/// open with another app, and may delete them later).
+pub fn is_temporary(path: &std::path::Path) -> bool {
+    let temp = std::env::temp_dir();
+    let temp = std::fs::canonicalize(&temp).unwrap_or(temp);
+    path.starts_with(&temp)
+        || [
+            "/tmp/",
+            "/private/tmp/",
+            "/var/folders/",
+            "/private/var/folders/",
+            "/var/tmp/",
+        ]
+        .iter()
+        .any(|p| path.starts_with(p))
+}
+
 /// Paths opened since the last call, oldest first.
 pub fn take_opened() -> Vec<PathBuf> {
     std::mem::take(&mut *OPENED.lock().expect("lock"))
@@ -106,5 +123,23 @@ mod macos {
         } else {
             tracing::warn!("the application delegate already handles opened files");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_paths() {
+        let t = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        assert!(is_temporary(&t.join("mozilla_x/paper.pdf")));
+        assert!(is_temporary(std::path::Path::new("/tmp/paper.pdf")));
+        assert!(!is_temporary(std::path::Path::new(
+            "/Users/me/Papers/paper.pdf"
+        )));
+        assert!(!is_temporary(std::path::Path::new(
+            "/home/me/Downloads/paper.pdf"
+        )));
     }
 }

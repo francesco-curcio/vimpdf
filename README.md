@@ -213,6 +213,9 @@ cancels; Up / Down browse the history.
 | `:help` | Help overlay |
 | `:w` | Save annotations into the PDF |
 | `:w <path>` | Save a copy with the annotations |
+| `:saveas <path>` | Save a copy with the annotations and continue in it |
+| `:w!` | Save into a temporary copy anyway (see "PDFs from the browser") |
+| `:annotated` | Open the other copy of this paper that has your annotations |
 | `:wq`, `:x` | Save and quit |
 | `:q` | Quit (refused while there are unsaved annotations) |
 | `:q!` | Quit, discarding unsaved annotations |
@@ -305,6 +308,28 @@ Zotero and other viewers show them too.
   you save (`:w`) or discard (`:q!`, `:e!`); closing the window warns once.
 - If the file changes on disk while you have unsaved annotations, vimpdf
   doesn't reload it but tells you; its own saves never trigger a reload.
+
+### PDFs from the browser
+
+When a browser opens a PDF in vimpdf, it first downloads it, so every click
+gives a new copy. vimpdf copes with that:
+
+- **Your place follows the paper, not the file.** Each document is recognised
+  by the permanent ID inside the PDF (or a hash of the file), so a fresh copy
+  of a paper you've read opens where you left off.
+- **Annotations are never lost to a temporary copy.** If the PDF lives in a
+  temporary folder (where browsers put files they hand to other apps), `:w`
+  refuses and explains; `:saveas ~/Papers/name.pdf` saves a permanent copy
+  with your highlights and continues there (`:w!` saves into the temporary
+  file anyway). The first highlight in such a file shows a reminder.
+- **Back to your annotated copy:** opening another copy of a paper you
+  annotated says so — `:annotated` (or File → Open annotated copy) switches to
+  it.
+
+To keep Firefox's Downloads folder clean, set these in `about:config` (they
+only affect files opened with another application, not normal downloads):
+`browser.download.start_downloads_in_tmp_dir = true` and
+`browser.helperApps.deleteTempFileOnExit = true`.
 
 ### Redaction (censoring)
 

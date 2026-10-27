@@ -86,10 +86,21 @@ impl VimpdfApp {
                 self.item("&Save annotations", Command::Write(None), ":w")
                     .enabled(self.annots.unsaved),
                 self.item(
-                    "Save a cop&y as…",
+                    "Save &as… (and switch to it)",
+                    Command::EnterCommandLine("saveas ".into()),
+                    ":saveas",
+                ),
+                self.item(
+                    "Save a cop&y…",
                     Command::EnterCommandLine("w ".into()),
                     ":w <path>",
                 ),
+                self.item(
+                    "Open a&nnotated copy",
+                    Command::OpenAnnotatedCopy,
+                    ":annotated",
+                )
+                .enabled(self.persist.annotated_copy.is_some()),
                 self.item(
                     "A&pply redactions…",
                     Command::EnterCommandLine("redact ".into()),

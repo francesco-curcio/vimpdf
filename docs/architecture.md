@@ -136,7 +136,13 @@ page + offset positions. Every jump command records the position first.
   flattened with depths, and shown by `ui/outline.rs`; `app/reading.rs`
   handles its keys.
 - `state.rs` stores per-file state as TOML under the state directory, named
-  by an FNV-1a hash of the canonical path (stable across Rust versions).
+  by an FNV-1a hash of the canonical path (stable across Rust versions). Each
+  state also records the document's fingerprint (`document::fingerprint`: the
+  first half of the PDF `/ID`, which survives edits; else a file hash) and how
+  many annotations that copy holds, so `state::find_copies` can restore the
+  place for a new copy of the same paper and point to an annotated one.
+  `platform::is_temporary` detects browser-style temporary copies, where `:w`
+  is refused in favour of `:saveas`.
 - `watch.rs` watches the file's directory with `notify` (tools often replace
   files by renaming); the app reloads 300 ms after the last change.
 

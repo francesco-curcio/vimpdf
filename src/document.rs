@@ -39,6 +39,8 @@ pub struct DocInfo {
     pub page_sizes: Vec<PageSize>,
     /// Document properties, as (name, value) for the non-empty ones.
     pub metadata: Vec<(&'static str, String)>,
+    /// Identifies the document across copies (see [`fingerprint`]).
+    pub fingerprint: Option<String>,
 }
 
 impl DocInfo {
@@ -72,12 +74,34 @@ impl DocInfo {
         Ok(Self {
             page_sizes,
             metadata,
+            fingerprint: fingerprint(path),
         })
     }
 
     pub fn page_count(&self) -> usize {
         self.page_sizes.len()
     }
+}
+
+/// What identifies a document across copies (e.g. downloaded twice): the
+/// first half of the PDF's `/ID`, which stays the same when the file is
+/// edited and saved; for PDFs without an ID, a hash of the file.
+pub fn fingerprint(path: &Path) -> Option<String> {
+    let pdf_id = path.to_str().and_then(|p| {
+        let doc = mupdf::pdf::PdfDocument::open(p).ok()?;
+        let id = doc.trailer().ok()?.get_dict("ID").ok()??;
+        let first = id.get_array(0).ok()??.as_bytes().ok()?;
+        (!first.is_empty() && first.iter().any(|b| *b != 0)).then_some(first)
+    });
+    if let Some(id) = pdf_id {
+        let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();
+        return Some(format!("id:{hex}"));
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+    });
+    Some(format!("hash:{hash:016x}-{}", bytes.len()))
 }
 
 fn page_sizes(doc: &Document, count: i32) -> Result<Vec<PageSize>> {
@@ -407,6 +431,13 @@ mod tests {
                 "tile row {row} differs"
             );
         }
+
+        // Copies of a file share the fingerprint; the real test PDF has an /ID.
+        let fp = fingerprint(path).unwrap();
+        let copy = std::env::temp_dir().join(format!("vimpdf-fp-test-{}.pdf", std::process::id()));
+        std::fs::copy(path, &copy).unwrap();
+        assert_eq!(fingerprint(&copy).as_deref(), Some(fp.as_str()));
+        std::fs::remove_file(&copy).unwrap();
 
         let (links, outline) = load_links_and_outline(path).unwrap();
         assert_eq!(links.len(), info.page_count());

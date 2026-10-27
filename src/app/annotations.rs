@@ -40,6 +40,10 @@ pub(super) struct Annotations {
     await_color: bool,
     quit_after_save: bool,
     close_attempt: Option<Instant>,
+    /// `:saveas` in progress: switch to this file once it's written.
+    switch_after_save: Option<PathBuf>,
+    /// The temporary-copy hint was shown for this document.
+    temp_hint_shown: bool,
 }
 
 impl VimpdfApp {
@@ -155,7 +159,27 @@ impl VimpdfApp {
 
     // --- Saving and quitting ----------------------------------------------
 
+    fn resolve(&self, p: PathBuf) -> PathBuf {
+        if p.is_relative() {
+            self.view.path.parent().map(|d| d.join(&p)).unwrap_or(p)
+        } else {
+            p
+        }
+    }
+
+    /// `:w`: refuses to save into a temporary copy (a browser may delete it).
     pub(super) fn write(&mut self, path: Option<PathBuf>) {
+        if path.is_none() && self.annots.unsaved && crate::platform::is_temporary(&self.view.path) {
+            return self.error(
+                "This PDF is a temporary copy (e.g. opened from a browser) and may be deleted: \
+                 :saveas <path> keeps it with your annotations, :w! saves here anyway",
+            );
+        }
+        self.write_unchecked(path);
+    }
+
+    /// `:w!`.
+    pub(super) fn write_unchecked(&mut self, path: Option<PathBuf>) {
         if path.is_none() && !self.annots.unsaved {
             return self.info("No changes to save");
         }
@@ -167,6 +191,22 @@ impl VimpdfApp {
             }
         });
         self.view.editor.request(EditRequest::Save { path });
+    }
+
+    /// `:saveas <path>`: write a copy with the annotations, then open it at
+    /// the same place.
+    pub(super) fn save_as(&mut self, path: PathBuf) {
+        let path = self.resolve(path);
+        if path.exists() {
+            return self.error(format!(
+                "{} already exists; choose another name",
+                path.display()
+            ));
+        }
+        self.annots.switch_after_save = Some(path.clone());
+        self.view
+            .editor
+            .request(EditRequest::Save { path: Some(path) });
     }
 
     pub(super) fn write_quit(&mut self, ctx: &egui::Context) {
@@ -181,7 +221,11 @@ impl VimpdfApp {
     /// `q` / `:q`: refuses while there are unsaved annotations.
     pub(super) fn quit(&mut self, ctx: &egui::Context) {
         if self.annots.unsaved {
-            return self.error("Unsaved annotations: :w saves, :wq saves and quits, :q! discards");
+            return self.error(if crate::platform::is_temporary(&self.view.path) {
+                "Unsaved annotations in a temporary copy: :saveas <path> keeps them, :q! discards"
+            } else {
+                "Unsaved annotations: :w saves, :wq saves and quits, :q! discards"
+            });
         }
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
@@ -233,6 +277,15 @@ impl VimpdfApp {
                 } => {
                     self.annots.unsaved_other = unsaved_other;
                     tracing::debug!(count = annots.len(), ?pages, unsaved, "annotations changed");
+                    if unsaved
+                        && !self.annots.temp_hint_shown
+                        && crate::platform::is_temporary(&self.view.path)
+                    {
+                        self.annots.temp_hint_shown = true;
+                        self.info(
+                            "This is a temporary copy that may be deleted: :saveas <path> keeps it with your annotations",
+                        );
+                    }
                     self.annots.list = annots;
                     self.annots.unsaved = unsaved;
                     self.view.content_changed(working_copy, &pages);
@@ -252,6 +305,15 @@ impl VimpdfApp {
                         if self.annots.quit_after_save {
                             ctx.send_viewport_cmd(ViewportCommand::Close);
                         }
+                    } else if self.annots.switch_after_save.as_ref() == Some(&path) {
+                        // `:saveas`: the copy has everything; continue there.
+                        self.annots.switch_after_save = None;
+                        // Still "unsaved" while switching, so the old file's
+                        // state doesn't claim to hold these annotations.
+                        self.open(ctx, path.clone(), true);
+                        self.annots.unsaved = false;
+                        self.annots.unsaved_other = false;
+                        self.info(format!("Saved as {} — now editing it", path.display()));
                     } else {
                         self.info(format!("Saved a copy as {}", path.display()));
                     }
