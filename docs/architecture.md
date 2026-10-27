@@ -140,6 +140,19 @@ page + offset positions. Every jump command records the position first.
 - `watch.rs` watches the file's directory with `notify` (tools often replace
   files by renaming); the app reloads 300 ms after the last change.
 
+## macOS integration
+
+`main.rs` creates the winit event loop itself (`eframe::create_native` +
+`run_app`) instead of `eframe::run_native`, to run code between the loop's
+creation and its start. There `platform::install_open_handler` adds an
+`application:openURLs:` method to winit's application delegate class with
+`class_addMethod` (winit 0.30 registers its own delegate and aborts if it is
+replaced). Opened paths are queued; a file opened while launching is already
+queued when eframe creates the app, later ones are picked up each frame.
+Without a document pdfv opens `welcome.rs`'s generated one-page PDF.
+`scripts/bundle-macos.sh` builds the `.app` with an `Info.plist` declaring
+`com.adobe.pdf` as a viewable document type.
+
 ## Config
 
 `config.rs`: every option goes through `Config::set(key, toml::Value)`, used
@@ -167,6 +180,9 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `watch.rs` | File change notifications |
 | `app/reading.rs` | Recolor, outline keys, state save/restore, auto-reload |
 | `ui/outline.rs` | Outline panel |
+| `platform.rs` | Files opened from the system (macOS `application:openURLs:`) |
+| `welcome.rs` | The page shown when no document is open |
+| `scripts/` | App bundle and icon generation (macOS) |
 | `selection.rs` | Text positions, caret motions, selections, clean copying |
 | `app/hints.rs`, `app/searching.rs`, `app/visual.rs` | App-side hint mode, search, visual mode and mouse selection |
 | `config.rs` | Options, TOML loading, `:set` |

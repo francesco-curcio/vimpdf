@@ -9,7 +9,8 @@ Status: in development — see [PLAN.md](PLAN.md) for the roadmap. Done so far:
 continuous scrolling, vim motions with counts, links, zoom and fit modes,
 status bar, `:` command line, config file, toolbar, help overlay, search,
 link hints, jumplist and marks, text selection with vim visual mode and the
-mouse, recolor (dark mode), outline panel, remembered positions, auto-reload.
+mouse, recolor (dark mode), outline panel, remembered positions, auto-reload,
+and a macOS app bundle that can be the default PDF viewer (Finder, Firefox).
 
 Documentation:
 
@@ -40,11 +41,35 @@ cargo install --path .
 fish_add_path ~/.cargo/bin   # once, if ~/.cargo/bin isn't on your PATH
 ```
 
+### macOS app (Finder, Dock, Firefox)
+
+```fish
+scripts/bundle-macos.sh             # builds target/pdfv.app
+scripts/bundle-macos.sh --install   # …and copies it to ~/Applications
+```
+
+The bundle declares PDF as a document type it can view, so after installing
+it:
+
+- **Finder**: right-click a PDF → Open With → pdfv. To make it the default,
+  Get Info (⌘I) on a PDF → Open with: pdfv → Change All….
+- **Firefox**: Settings → General → Applications → "Portable Document Format
+  (PDF)" → Use other… → choose `~/Applications/pdfv.app`. Clicking a PDF
+  link then downloads it and opens it in pdfv.
+- Opening a PDF while pdfv is running replaces the open document (one window,
+  one document). Dropping a PDF on the window does the same.
+- Launched without a file (e.g. from the Dock), pdfv shows a short welcome
+  page; open a file with `:open <path>` or by dropping it on the window.
+
+The app is signed ad hoc (no Apple developer certificate), which is fine for
+a locally built app. `scripts/make-icon.sh` regenerates the icon.
+
 ## Usage
 
 ```fish
 pdfv paper.pdf
 pdfv --config other.toml paper.pdf   # use a different config file
+pdfv                                  # welcome page; :open a file from there
 ```
 
 Key notation follows vim: `<C-d>` is Ctrl+d, `<C-F>` is Ctrl+Shift+f,

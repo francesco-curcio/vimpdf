@@ -508,6 +508,24 @@ impl PdfvApp {
         self.pending_scroll = Vec2::ZERO;
     }
 
+    /// Files opened from outside (Finder, Dock, browser) or dropped on the
+    /// window replace the current document.
+    fn open_external_files(&mut self, ctx: &egui::Context) {
+        let mut paths = crate::platform::take_opened();
+        paths.extend(ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_owned())
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect::<Vec<_>>()
+        }));
+        if let Some(path) = paths.pop() {
+            self.execute(Command::Open(path), ctx);
+            ctx.send_viewport_cmd(ViewportCommand::Focus);
+        }
+    }
+
     /// The mode a prompt returns to: visual stays visual.
     fn prompt_mode(&self) -> Mode {
         if self.mode == Mode::Visual {
@@ -650,6 +668,7 @@ impl eframe::App for PdfvApp {
             self.restore_state();
         }
         self.check_reload(&ctx);
+        self.open_external_files(&ctx);
         if let Some(vp) = self.viewport.as_mut()
             && (vp.width, vp.height) != (area.width(), area.height())
         {
