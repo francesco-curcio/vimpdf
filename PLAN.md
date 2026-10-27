@@ -13,8 +13,9 @@ order; each one must leave the app in a runnable, usable state.
 
 ## Status (2026-10-27)
 
-All milestones M0–M8 are implemented and committed (one commit per milestone,
-see `git log`). Each milestone section below has a **Status** note with what
+Milestones M0–M8 are implemented and committed (one commit per milestone,
+see `git log`). M9–M11 (annotations, redaction, menu bar) were added on
+2026-10-27 at the user's request and are in progress. Each milestone section below has a **Status** note with what
 was done, how its "done when" was checked, and any deviation from the plan.
 User-facing documentation is in `README.md`, `docs/configuration.md` and
 `config.example.toml`; code structure in `docs/architecture.md`.
@@ -54,7 +55,8 @@ and in the README.
 **Non-goals (for now)**
 
 - Writing a PDF parser or renderer — rendering is delegated to MuPDF.
-- Annotation/editing, form filling, printing.
+- Editing page content, form filling, printing. (Annotations — highlights,
+  comments — and redaction were added later as M9–M10.)
 - CI, packaging, signing, distribution, Windows support.
 - Multiple documents in tabs (one window = one document is fine).
 
@@ -373,6 +375,80 @@ manual check against a real paper, and a git commit.
 - Handle files opened via Finder / Firefox "open with" (the macOS open-document Apple Event). Investigate what `winit`/`eframe` currently expose for this; if it isn't supported, document the gap and fall back to an AppleScript wrapper app that calls the binary with the file path.
 - **Done when:** the app can be set as the PDF handler in Firefox and opens papers focused and maximised.
 - **Status:** done (`1d54d1a`, `81af9fa`). `scripts/bundle-macos.sh [--install]` builds `target/pdfv.app`. winit 0.30 registers its own app delegate (its docs say otherwise) and aborts if it's replaced, so `application:openURLs:` is added to winit's delegate class at runtime; no AppleScript wrapper needed. Tested with `open -a`: launch with a file, a second file to the running app, launch without a file (welcome page). A newly opened file replaces the current one (one window).
+
+### M9 — Highlights and comments
+
+Annotations are standard PDF annotations, stored inside the PDF, so other
+viewers (Preview, Acrobat, Zotero) show them too.
+
+- An editor thread owns a writable copy of the document (`mupdf::pdf`). Every
+  edit is applied there and written to a private working copy; render workers
+  switch to it, and only the tiles of changed pages are re-rendered (per-page
+  generation in the render key; old tiles stay as the fallback, so no flash).
+- Highlight the visual selection (keyboard or mouse) in a colour: `a<letter>`
+  in visual mode, with a configurable palette of colours and letters
+  (default yellow `y`, green `g`, blue `b`, pink `p`, red `r`, orange `o`);
+  `aa` uses the last colour.
+- Comments: `c` in visual mode highlights and opens a comment editor (multi-line;
+  `<C-s>`/`Cmd+Enter` saves, `Esc` cancels). Highlights with a comment get a
+  small marker; hovering shows the comment.
+- Annotations panel (`<C-a>` / `:annotations`): every highlight, comment and
+  redaction mark in the document with page, colour, text and comment; `j`/`k`,
+  Enter jumps, `e` edits the comment, `c<letter>` recolours, `d` deletes.
+- Right-click on an annotation: edit comment, recolour, delete (each with its key).
+- `u` undoes the last annotation change.
+- Saving: `:w` writes the annotations into the PDF (incremental save, so the
+  original bytes are kept), `:w <path>` saves a copy, `:q` refuses to quit
+  with unsaved changes (`:q!` forces, `:wq` saves and quits); closing the window
+  warns once. The status bar shows `[+]` while there are unsaved changes.
+  pdfv's own saves don't trigger auto-reload; an external change while there
+  are unsaved changes is reported instead of reloaded.
+- **Done when:** highlights in three colours and a comment added in pdfv
+  (keyboard only, and with the mouse) are saved with `:w`, survive reopening,
+  and the PDF's annotations are listed with the right colours and comment by
+  MuPDF on re-read.
+
+### M10 — Redaction (censoring)
+
+Redaction permanently removes content; the result is always written to a new
+file, never over the original.
+
+- Mark text for redaction: `x` in visual mode (keyboard or mouse selection);
+  `:redact-matches` marks every match of the current search (e.g. a name).
+- Mark an area (figures, images): `X` enters area mode — a rectangle moved with
+  `h`/`j`/`k`/`l`, resized with `H`/`J`/`K`/`L` (counts work), `Enter` marks it;
+  or drag a rectangle with the mouse in that mode.
+- Marks are redaction annotations (red outlines), listed in the annotations
+  panel, removable and undoable like other annotations.
+- `:redact [path]` (File → Apply redactions…) applies all marks: text under
+  them is removed, image pixels are blanked, covered vector art is removed,
+  black boxes are drawn; the file is fully rewritten with garbage collection
+  (not incremental, so nothing removed survives in the file) to
+  `<name>-redacted.pdf` unless a path is given, and then opened.
+- After writing, the new file is re-read and the text inside every redacted
+  area is checked to be gone; the result is reported.
+- **Done when:** a name searched and redacted in a real paper, plus an area over
+  a figure, are gone from the written file (no text extraction or search finds
+  them, the figure pixels are blank), and the original file is unchanged.
+
+### M11 — Menu bar
+
+- A File / Edit / View menu bar at the top, shown by default (`ui.menubar`;
+  `<F10>` / `:set nomenubar` toggles). The button toolbar stays, below it,
+  hidden by default.
+- Every entry runs a `Command` and shows its current key binding (looked up in
+  the keymap, so config overrides are reflected).
+- File: Open…, Open recent, Reload, Save, Save as…, Apply redactions…,
+  Document properties, Quit. Edit: Undo, Copy, Highlight (colour submenu),
+  Comment, Mark for redaction, Mark area for redaction, Annotations…, Find…,
+  Find next/previous, Edit config file, Reload config. View: zoom in/out/100%,
+  fit width/page, recolor, outline, annotations, toolbar, status bar, menu
+  bar, fullscreen, keys (help).
+- Open recent: the most recently opened files, from the saved state.
+- Document properties: title, author, page count, file size, PDF version,
+  number of annotations.
+- **Done when:** every menu entry works and shows the right key, including
+  after rebinding a key in the config.
 
 ### Later ideas (not scheduled)
 
