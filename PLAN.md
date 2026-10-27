@@ -294,7 +294,7 @@ manual check against a real paper, and a git commit.
 - `pdfv <file.pdf>` opens a window and shows page 1 rendered via MuPDF.
 - Logging set up; clear error message for missing/invalid file.
 - **Done when:** a real arXiv paper's first page displays correctly and sharply on Retina.
-- **Status:** done (`b298916`). Page 1 rendered at Retina scale (2×) was checked from an image dump; the window was checked on a Retina display by the user.
+- **Status:** done (`de59782`). Page 1 rendered at Retina scale (2×) was checked from an image dump; the window was checked on a Retina display by the user.
 
 ### M1 — Continuous scrolling, motions, basic mouse
 
@@ -305,7 +305,7 @@ manual check against a real paper, and a git commit.
 - Mouse input routed through `input/mouse.rs` → `Command`, with hit-testing from screen to (page, PDF point).
 - Links extracted per page on a worker; pointer cursor on hover; click follows the link (internal: go to the target page; external: `open` in the default browser). Exact-position destinations come in M5.
 - **Done when:** scrolling through a 50-page paper at full speed never stutters or shows a blank page for more than a frame or two, memory stays bounded, and clicking a link in the paper goes to the right page.
-- **Status:** done (`8677f73`). Holding `j` never showed a blank page; at an extreme 50 screens/s with `<C-f>`, figure-heavy pages (~190 ms to render) can stay blank for up to 3 frames. Texture cache bounded at 512 MB.
+- **Status:** done (`abfc7f7`). Holding `j` never showed a blank page; at an extreme 50 screens/s with `<C-f>`, figure-heavy pages (~190 ms to render) can stay blank for up to 3 frames. Texture cache bounded at 512 MB.
 
 ### M2 — Zoom and fit modes
 
@@ -315,7 +315,7 @@ manual check against a real paper, and a git commit.
 - Horizontal scrolling when the page is wider than the window.
 - Fit mode re-applied on window resize.
 - **Done when:** zooming in on an equation, by keyboard or by pinching, stays sharp and responsive.
-- **Status:** done (`ea6e6a2`). Deviation: pages are rendered in 1024 px tiles from per-worker MuPDF display lists, so high zoom only renders what's near the view. Rapid zooming renders only the final scale. Pinch was not injectable in tests (⌘+wheel was).
+- **Status:** done (`32d8343`). Deviation: pages are rendered in 1024 px tiles from per-worker MuPDF display lists, so high zoom only renders what's near the view. Rapid zooming renders only the final scale. Pinch was not injectable in tests (⌘+wheel was).
 
 ### M3 — Status bar, command line, config, discoverability
 
@@ -326,7 +326,7 @@ manual check against a real paper, and a git commit.
 - `?` / `:help` overlay listing the currently active bindings (generated from the keymap, so it reflects config overrides).
 - Start maximised (sized to the screen's visible frame) when `start_maximised = true`, and make sure the window takes focus on launch.
 - **Done when:** a custom binding in the config works after `:source` without restarting, and shows up in the `?` overlay.
-- **Status:** done (`fb12a70`). Fixed during testing: keys typed in the same frame as `:` were lost (now carried into the line). Later fixed in M7: egui's Tab focus could leave the status-bar page number focused, swallowing keys.
+- **Status:** done (`45818e9`). Fixed during testing: keys typed in the same frame as `:` were lost (now carried into the line). Later fixed in M7: egui's Tab focus could leave the status-bar page number focused, swallowing keys.
 
 ### M4 — Search
 
@@ -335,7 +335,7 @@ manual check against a real paper, and a git commit.
 - Status bar shows `match i/N` and "searching…" while in progress.
 - Case-insensitive by default; smart-case if the query contains capitals.
 - **Done when:** searching a word in a 100-page document shows the first hit immediately and finishes without freezing the UI.
-- **Status:** done (`f5a12a7`). First full search of a 117-page document ~550 ms in the background, repeats ~1 ms (page text is cached). Matches span line breaks and hyphenated words.
+- **Status:** done (`3153204`). First full search of a 117-page document ~550 ms in the background, repeats ~1 ms (page text is cached). Matches span line breaks and hyphenated words.
 
 ### M5 — Links and jumplist
 
@@ -345,7 +345,7 @@ manual check against a real paper, and a git commit.
 - Jumplist: every non-local jump (link, `gg`, `G`, `:<n>`, search jump, mark) pushes the previous position; `<C-o>`/`<C-i>` move through it.
 - Marks: `m<letter>` / `'<letter>`.
 - **Done when:** in a paper, following a citation with `f` (or a click) and returning with `<C-o>` lands exactly where reading left off.
-- **Status:** done (`6d98e77`). `<C-o>` after following a citation returns to the exact previous offset. `''` jumps back to the last jump origin. `yf` uses egui's clipboard.
+- **Status:** done (`076ed7f`). `<C-o>` after following a citation returns to the exact previous offset. `''` jumps back to the last jump origin. `yf` uses egui's clipboard.
 
 ### M6 — Text selection and visual mode
 
@@ -358,7 +358,7 @@ manual check against a real paper, and a git commit.
 - `y` / `Cmd+C` copies to the clipboard. Clean the text on copy: expand ligatures (ﬁ → fi), join words hyphenated across line breaks, join wrapped lines within a block with spaces, keep block breaks as newlines.
 - Known limitations to document in the README rather than solve: reading order in multi-column layouts follows MuPDF's block order and can occasionally jump; math typically copies poorly; scanned PDFs without a text layer have nothing to select.
 - **Done when:** a paragraph from a two-column arXiv paper can be copied cleanly both with the mouse and using only the keyboard (e.g. `/` to the first words, `v`, `}` or `j`s, `y`).
-- **Status:** done (`5a18df4`). Tested on a two-column PRL paper: `v}y` copies a paragraph that continues into the next column cleanly; drag, double/triple click, Shift+click and the context menu work. Deviation: MuPDF's blocks are not paragraphs, so `PageText::from_raw` repairs the structure (merges line fragments, joins paragraphs across blocks and column breaks, splits at indents, drops margin line numbers of draft copies). `}`/`{` go to the end/start of the paragraph. Maths still copies poorly (font encodings).
+- **Status:** done (`ed34d1b`). Tested on a two-column PRL paper: `v}y` copies a paragraph that continues into the next column cleanly; drag, double/triple click, Shift+click and the context menu work. Deviation: MuPDF's blocks are not paragraphs, so `PageText::from_raw` repairs the structure (merges line fragments, joins paragraphs across blocks and column breaks, splits at indents, drops margin line numbers of draft copies). `}`/`{` go to the end/start of the paragraph. Maths still copies poorly (font encodings).
 
 ### M7 — Reading comfort
 
@@ -367,14 +367,14 @@ manual check against a real paper, and a git commit.
 - Persist per-file state (last position, zoom, fit mode) in `~/.local/state/pdfv/` keyed by a hash of the canonical path; restore on open.
 - Auto-reload when the file changes on disk (useful with LaTeX), keeping the current position.
 - **Done when:** reopening a paper returns to the same spot; recompiling a LaTeX document updates the view in place.
-- **Status:** done (`f08d358`). Reopening restored page, zoom and marks; a real `pdflatex` recompile reloaded once and kept the position. State is also saved every 10 s and on `:open`. Added `ui.recolor` and `ui.auto_reload` options.
+- **Status:** done (`a8742d8`). Reopening restored page, zoom and marks; a real `pdflatex` recompile reloaded once and kept the position. State is also saved every 10 s and on `:open`. Added `ui.recolor` and `ui.auto_reload` options.
 
 ### M8 — macOS integration
 
 - Build a proper `.app` bundle (e.g. with `cargo-bundle` or a small script) with an `Info.plist` declaring PDF as a supported document type, plus an icon.
 - Handle files opened via Finder / Firefox "open with" (the macOS open-document Apple Event). Investigate what `winit`/`eframe` currently expose for this; if it isn't supported, document the gap and fall back to an AppleScript wrapper app that calls the binary with the file path.
 - **Done when:** the app can be set as the PDF handler in Firefox and opens papers focused and maximised.
-- **Status:** done (`1d54d1a`, `81af9fa`). `scripts/bundle-macos.sh [--install]` builds `target/pdfv.app`. winit 0.30 registers its own app delegate (its docs say otherwise) and aborts if it's replaced, so `application:openURLs:` is added to winit's delegate class at runtime; no AppleScript wrapper needed. Tested with `open -a`: launch with a file, a second file to the running app, launch without a file (welcome page). A newly opened file replaces the current one (one window).
+- **Status:** done (`64f2afd`, `dfbb2a8`). `scripts/bundle-macos.sh [--install]` builds `target/pdfv.app`. winit 0.30 registers its own app delegate (its docs say otherwise) and aborts if it's replaced, so `application:openURLs:` is added to winit's delegate class at runtime; no AppleScript wrapper needed. Tested with `open -a`: launch with a file, a second file to the running app, launch without a file (welcome page). A newly opened file replaces the current one (one window).
 
 ### M9 — Highlights and comments
 
