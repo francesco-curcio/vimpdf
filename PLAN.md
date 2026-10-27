@@ -433,9 +433,14 @@ file, never over the original.
 
 ### M11 — Menu bar
 
-- A File / Edit / View menu bar at the top, shown by default (`ui.menubar`;
-  `<F10>` / `:set nomenubar` toggles). The button toolbar stays, below it,
-  hidden by default.
+- A File / Edit / View menu bar at the top, shown by default (`ui.menubar`,
+  `:set nomenubar` hides it). The button toolbar stays, below it, hidden by
+  default.
+- The menus are fully keyboard-driven: `<F10>` (command `menu`, rebindable)
+  opens File (also when the bar is hidden); `h`/`l` or ←/→ switch menus,
+  `j`/`k` or ↑/↓ move, Enter or `l` opens a submenu / runs the entry, `h`
+  leaves a submenu, `Esc` closes; each entry has an underlined letter that runs
+  it directly. The mouse works as usual.
 - Every entry runs a `Command` and shows its current key binding (looked up in
   the keymap, so config overrides are reflected).
 - File: Open…, Open recent, Reload, Save, Save as…, Apply redactions…,
@@ -447,8 +452,9 @@ file, never over the original.
 - Open recent: the most recently opened files, from the saved state.
 - Document properties: title, author, page count, file size, PDF version,
   number of annotations.
-- **Done when:** every menu entry works and shows the right key, including
-  after rebinding a key in the config.
+- **Done when:** every menu entry works from the keyboard (menu navigation and
+  letters) and with the mouse, and shows the right key, including after
+  rebinding a key in the config.
 
 ### Later ideas (not scheduled)
 
