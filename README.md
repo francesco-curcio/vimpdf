@@ -101,7 +101,7 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `v` / `V` | Visual mode (select text) / visual-line mode — see below |
 | `gv` | Word hints: a label on every word on screen; typing one starts visual mode there |
 | `:` | Command line |
-| `?` | Help overlay: active keys, mouse actions, commands |
+| `?` | Help overlay: active keys, mouse actions, commands. Your scroll keys (`j`/`k`, `<C-d>`/`<C-u>`, `gg`/`G`, counts…) scroll it; `?`, `Esc` or `q` close it |
 | `<Tab>` | Outline (table of contents) panel |
 | `<C-r>` | Toggle recolor (dark mode) |
 | `<C-t>` | Toggle the toolbar |
@@ -238,6 +238,13 @@ The page shown is the one at the centre of the window.
 ## Configuration
 
 `~/.config/pdfv/config.toml` (also on macOS), or `$XDG_CONFIG_HOME/pdfv/config.toml`.
+The file isn't created for you; to start from the documented example:
+
+```fish
+mkdir -p ~/.config/pdfv
+cp config.example.toml ~/.config/pdfv/config.toml
+```
+
 A missing file means defaults. Invalid entries are reported in the status bar
 and the log, and the default is kept — a bad config never stops the viewer.
 `:source` reloads the file without restarting.

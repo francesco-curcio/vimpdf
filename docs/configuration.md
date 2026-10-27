@@ -85,7 +85,12 @@ Sequences combine them: `"gg"`, `"m<Tab>"`. A count typed before a binding
 multiplies it (`5x` with the example above scrolls 15 steps).
 
 There are two modes with their own bindings: `[keys.normal]` and
-`[keys.visual]` (text selection).
+`[keys.visual]` (text selection). The help overlay (`?`) uses the normal-mode
+bindings: whatever is bound to the scroll commands (`scroll_down`,
+`half_page_down`, `screen_down`, `next_page`, `goto_first`, `goto_last`, and
+their opposites) scrolls the help, and `toggle_help`, `cancel` or `quit`
+close it. The keys of the outline panel and of hint mode are fixed for now
+(see the README).
 
 ```toml
 [keys.visual]

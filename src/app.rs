@@ -57,6 +57,7 @@ pub struct PdfvApp {
     searchline: CmdLine,
     toolbar: Toolbar,
     show_help: bool,
+    help_scroll: help::HelpScroll,
     message: Option<Message>,
     /// Keyboard scroll distance not yet applied (smooth scrolling).
     pending_scroll: Vec2,
@@ -108,6 +109,7 @@ impl PdfvApp {
             searchline: CmdLine::new('/'),
             toolbar: Toolbar::default(),
             show_help: false,
+            help_scroll: help::HelpScroll::default(),
             message: None,
             pending_scroll: Vec2::ZERO,
             scrolling_up: false,
@@ -526,6 +528,30 @@ impl PdfvApp {
         }
     }
 
+    /// A command while the help overlay is open: scrolling commands scroll
+    /// it, closing ones close it, everything else is ignored.
+    fn help_key(&mut self, cmd: Command) {
+        let step = self.config.scroll_step;
+        let screen = self.help_scroll.view_height().max(step);
+        let scroll = &mut self.help_scroll;
+        match &cmd {
+            Command::ScrollDown(n) => scroll.by(*n as f32 * step),
+            Command::ScrollUp(n) => scroll.by(-(*n as f32) * step),
+            Command::HalfPageDown(n) => scroll.by(*n as f32 * screen / 2.0),
+            Command::HalfPageUp(n) => scroll.by(-(*n as f32) * screen / 2.0),
+            Command::ScreenDown(n) | Command::NextPage(n) => scroll.by(*n as f32 * screen),
+            Command::ScreenUp(n) | Command::PrevPage(n) => scroll.by(-(*n as f32) * screen),
+            Command::GotoFirst => scroll.scroll_top(),
+            Command::GotoLast => scroll.scroll_bottom(),
+            Command::ToggleHelp | Command::Cancel | Command::Quit => {
+                self.show_help = false;
+                return;
+            }
+            _ => {}
+        }
+        tracing::trace!(?cmd, offset = ?scroll.requested(), "help key");
+    }
+
     /// The mode a prompt returns to: visual stays visual.
     fn prompt_mode(&self) -> Mode {
         if self.mode == Mode::Visual {
@@ -567,8 +593,9 @@ impl PdfvApp {
         let mut tokens = key_tokens(&events).into_iter();
         while let Some(tok) = tokens.next() {
             if self.show_help {
-                if matches!(tok.as_str(), "<Esc>" | "?" | "q") {
-                    self.show_help = false;
+                // Normal-mode bindings scroll the help instead of the page.
+                if let Some(cmd) = self.keys.feed(&tok, &self.keymap) {
+                    self.help_key(cmd);
                 }
                 continue;
             }
@@ -836,6 +863,7 @@ impl eframe::App for PdfvApp {
                 &self.keymap,
                 &self.visual_keymap,
                 &mut self.show_help,
+                &mut self.help_scroll,
                 font_size,
             );
         }
