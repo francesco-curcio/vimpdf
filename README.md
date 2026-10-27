@@ -13,6 +13,10 @@ mouse, recolor (dark mode), outline panel, remembered positions, auto-reload,
 a macOS app bundle that can be the default PDF viewer (Finder, Firefox),
 highlights and comments saved into the PDF, and redaction (censoring).
 
+Most things are reachable three ways: a vim-style key, the `:` command line,
+and the File / Edit / View menus (which show each entry's key, and are
+themselves driven from the keyboard with `gm`).
+
 Documentation:
 
 - this README — building, running, keys, mouse, command line
@@ -105,6 +109,7 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `u` | Undo the last annotation change |
 | `X` | Mark an area for redaction (see Redaction) |
 | `:` | Command line |
+| `gm` | Open the menu bar (File / Edit / View) — see Menus |
 | `?` | Help overlay: active keys, mouse actions, commands. Your scroll keys (`j`/`k`, `<C-d>`/`<C-u>`, `gg`/`G`, counts…) scroll it; `?`, `Esc` or `q` close it |
 | `<Tab>` | Outline (table of contents) panel |
 | `<C-r>` | Toggle recolor (dark mode) |
@@ -145,6 +150,29 @@ after checking a citation `<C-o>` returns exactly to where you were reading.
 `ma` remembers the current position as mark `a`; `'a` jumps to it. Positions
 are stored as page + offset, so they survive a reload.
 
+### Menus
+
+The menu bar at the top (hide it with `:set nomenubar`) has File, Edit and
+View menus. Every entry shows its key — your own binding if you changed it in
+the config — so the menus double as a cheat sheet.
+
+From the keyboard: `gm` opens File (also when the bar is hidden; `<F10>`
+works too where the OS doesn't take it — on macOS it usually does). `h`/`l`
+or ←/→ switch menus, `j`/`k` or ↑/↓ move, Enter or `l` opens a submenu or runs
+the entry, `h` leaves a submenu, `Esc` closes. Each entry has an underlined
+letter that runs it directly (`gm` `l` `l` `w` = View → Fit width). With the
+mouse, click as usual.
+
+- **File**: open, open recent (the files you read last), reload, save
+  annotations, save a copy, apply redactions, document info (title, author,
+  dates, PDF version, size, annotation counts), quit.
+- **Edit**: undo, copy, select text, highlight (each colour), comment,
+  annotations, mark for redaction (selection, area, search matches), find,
+  find next/previous, edit the config file (opens it in your text editor,
+  creating it from the example if needed), reload the config.
+- **View**: zoom, fit width/page, recolor, outline, annotations panel, menu
+  bar, toolbar, status bar, fullscreen, keys and commands.
+
 ### Command line
 
 Press `:` and type a command, then Enter. `Esc` (or Backspace on an empty line)
@@ -164,6 +192,8 @@ cancels; Up / Down browse the history.
 | `:q!` | Quit, discarding unsaved annotations |
 | `:e!` | Reload the file, discarding unsaved annotations |
 | `:annotations` | Annotations panel |
+| `:info` | Document properties |
+| `:config` | Open the config file in your text editor |
 | `:redact-matches` | Mark every match of the current search for redaction |
 | `:redact [path]` | Apply all redaction marks, writing `<name>-redacted.pdf` (or `path`) |
 | `:<command> [args]` | Any bindable command, e.g. `:zoom_in 3`, `:fit_page` |

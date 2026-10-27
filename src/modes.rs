@@ -18,6 +18,8 @@ pub enum Mode {
     Comment,
     /// Placing a rectangle to redact (`X`).
     RedactArea,
+    /// A menu of the menu bar is open.
+    Menu,
 }
 
 impl Mode {
@@ -32,6 +34,7 @@ impl Mode {
             Mode::Annotations => "ANNOTATIONS",
             Mode::Comment => "COMMENT",
             Mode::RedactArea => "REDACT AREA",
+            Mode::Menu => "MENU",
         }
     }
 }

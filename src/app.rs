@@ -22,6 +22,7 @@ use crate::viewport::{FitMode, Viewport};
 
 mod annotations;
 mod hints;
+mod menu;
 mod reading;
 mod redact;
 mod searching;
@@ -83,6 +84,10 @@ pub struct PdfvApp {
     annots: Annotations,
     /// The rectangle being placed in redact-area mode.
     area: Option<AreaState>,
+    menu_state: ui::menubar::MenuState,
+    /// Mode to return to when a menu closes.
+    menu_return: Mode,
+    show_props: bool,
 }
 
 impl PdfvApp {
@@ -133,6 +138,9 @@ impl PdfvApp {
             persist: Persistence::default(),
             annots: Annotations::default(),
             area: None,
+            menu_state: Default::default(),
+            menu_return: Mode::Normal,
+            show_props: false,
         };
         app.install_font(ctx, &mut warnings);
         app.watch_file(ctx);
@@ -481,6 +489,10 @@ impl PdfvApp {
             Command::RedactArea => self.start_redact_area(),
             Command::RedactMatches => self.redact_matches(),
             Command::ApplyRedactions(path) => self.apply_redactions(path),
+            Command::OpenMenu => self.open_menu(),
+            Command::ToggleMenubar => self.config.menubar = !self.config.menubar,
+            Command::EditConfig => self.edit_config(),
+            Command::ToggleProperties => self.show_props = !self.show_props,
             Command::Set { option, value } => match self.config.set_from_str(&option, &value) {
                 Ok(key) => {
                     let mut warnings = Vec::new();
@@ -622,6 +634,13 @@ impl PdfvApp {
                 .filter_map(|tok| self.outline_key(tok))
                 .collect();
         }
+        if self.mode == Mode::Menu {
+            let events = ctx.input(|i| i.events.clone());
+            return key_tokens(&events)
+                .iter()
+                .filter_map(|tok| self.menu_key(tok))
+                .collect();
+        }
         if self.mode == Mode::RedactArea {
             let events = ctx.input(|i| i.events.clone());
             for tok in key_tokens(&events) {
@@ -644,6 +663,12 @@ impl PdfvApp {
         let mut commands = Vec::new();
         let mut tokens = key_tokens(&events).into_iter();
         while let Some(tok) = tokens.next() {
+            if self.show_props {
+                if matches!(tok.as_str(), "<Esc>" | "q" | "<CR>") {
+                    self.show_props = false;
+                }
+                continue;
+            }
             if self.show_help {
                 // Normal-mode bindings scroll the help instead of the page.
                 if let Some(cmd) = self.keys.feed(&tok, &self.keymap) {
@@ -730,6 +755,12 @@ impl eframe::App for PdfvApp {
         // Split the window: toolbar, pages, status bar / command line.
         let font_size = self.config.font_size;
         let mut area = ui.max_rect();
+        let menubar_rect = (self.config.menubar || self.mode == Mode::Menu).then(|| {
+            let h = ui::bar_height(font_size);
+            let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
+            area.min.y += h;
+            r
+        });
         let toolbar_rect = self.config.toolbar.then(|| {
             let h = toolbar::height(font_size);
             let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
@@ -935,6 +966,14 @@ impl eframe::App for PdfvApp {
             );
         }
         if let Some(cmd) = self.context_menu(&ctx) {
+            ui_commands.push(cmd);
+        }
+        if self.show_props {
+            self.show_properties(&ctx);
+        }
+        if let Some(rect) = menubar_rect
+            && let Some(cmd) = self.show_menubar(&ctx, ui, rect)
+        {
             ui_commands.push(cmd);
         }
         if self.mode == Mode::Comment {

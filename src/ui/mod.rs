@@ -6,6 +6,7 @@ pub mod cmdline;
 pub mod comment;
 pub mod fonts;
 pub mod help;
+pub mod menubar;
 pub mod outline;
 pub mod statusbar;
 pub mod toolbar;

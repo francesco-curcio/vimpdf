@@ -37,6 +37,8 @@ impl PageSize {
 #[derive(Debug, Clone)]
 pub struct DocInfo {
     pub page_sizes: Vec<PageSize>,
+    /// Document properties, as (name, value) for the non-empty ones.
+    pub metadata: Vec<(&'static str, String)>,
 }
 
 impl DocInfo {
@@ -47,7 +49,30 @@ impl DocInfo {
             bail!("'{}' has no pages", path.display());
         }
         let page_sizes = page_sizes(&doc, count)?;
-        Ok(Self { page_sizes })
+        use mupdf::MetadataName as M;
+        let metadata = [
+            ("Title", M::Title),
+            ("Author", M::Author),
+            ("Subject", M::Subject),
+            ("Keywords", M::Keywords),
+            ("Creator", M::Creator),
+            ("Producer", M::Producer),
+            ("Created", M::CreationDate),
+            ("Modified", M::ModDate),
+            ("Format", M::Format),
+            ("Encryption", M::Encryption),
+        ]
+        .into_iter()
+        .filter_map(|(name, key)| {
+            let v = doc.metadata(key).ok()?;
+            let v = v.trim();
+            (!v.is_empty()).then(|| (name, v.to_owned()))
+        })
+        .collect();
+        Ok(Self {
+            page_sizes,
+            metadata,
+        })
     }
 
     pub fn page_count(&self) -> usize {

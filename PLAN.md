@@ -13,9 +13,9 @@ order; each one must leave the app in a runnable, usable state.
 
 ## Status (2026-10-27)
 
-Milestones M0–M8 are implemented and committed (one commit per milestone,
-see `git log`). M9–M11 (annotations, redaction, menu bar) were added on
-2026-10-27 at the user's request and are in progress. Each milestone section below has a **Status** note with what
+All milestones M0–M11 are implemented and committed (one commit per
+milestone, see `git log`). M9–M11 (annotations, redaction, menu bar) were
+added on 2026-10-27 at the user's request. Each milestone section below has a **Status** note with what
 was done, how its "done when" was checked, and any deviation from the plan.
 User-facing documentation is in `README.md`, `docs/configuration.md` and
 `config.example.toml`; code structure in `docs/architecture.md`.
@@ -440,8 +440,9 @@ file, never over the original.
 - A File / Edit / View menu bar at the top, shown by default (`ui.menubar`,
   `:set nomenubar` hides it). The button toolbar stays, below it, hidden by
   default.
-- The menus are fully keyboard-driven: `<F10>` (command `menu`, rebindable)
-  opens File (also when the bar is hidden); `h`/`l` or ←/→ switch menus,
+- The menus are fully keyboard-driven: `gm` (command `menu`, rebindable; also
+  `<F10>`, which macOS usually keeps for itself) opens File (also when the bar
+  is hidden); `h`/`l` or ←/→ switch menus,
   `j`/`k` or ↑/↓ move, Enter or `l` opens a submenu / runs the entry, `h`
   leaves a submenu, `Esc` closes; each entry has an underlined letter that runs
   it directly. The mouse works as usual.
@@ -459,6 +460,7 @@ file, never over the original.
 - **Done when:** every menu entry works from the keyboard (menu navigation and
   letters) and with the mouse, and shows the right key, including after
   rebinding a key in the config.
+- **Status:** done. Keyboard: `gm ll p` (View → Fit page), `gm llw`, `gm i` (Document info), `gm llr` (recolor), Edit → Highlight → colour submenu, File → Open recent submenu, Esc; mouse: View → Zoom in. A test checks that rebinding `toggle_recolor` to `R` changes the key shown. Deviation: the default key is `gm` — `<F10>` stays bound but macOS keeps F-keys for itself (Mission Control / media keys) on the user's machine.
 
 ### Later ideas (not scheduled)
 

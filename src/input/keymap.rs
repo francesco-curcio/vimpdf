@@ -143,6 +143,15 @@ impl Keymap {
         self.bindings.get(seq)
     }
 
+    /// The shortest key sequence bound to `cmd`, for menus ("gg", "<C-a>").
+    pub fn key_for(&self, cmd: &Command) -> Option<String> {
+        self.bindings
+            .iter()
+            .filter(|(_, c)| *c == cmd)
+            .map(|(seq, _)| seq.concat())
+            .min_by_key(|s| (s.starts_with('<'), s.len(), s.clone()))
+    }
+
     /// All bindings, grouped by command in a stable order, for the help
     /// overlay: (keys joined, command).
     pub fn describe(&self) -> Vec<(String, Command)> {
@@ -230,6 +239,8 @@ impl Keymap {
             ("u", Undo),
             ("<C-a>", ToggleAnnotations),
             ("X", RedactArea),
+            ("gm", OpenMenu),
+            ("<F10>", OpenMenu),
         ] {
             k.bind(seq, cmd);
         }
@@ -262,6 +273,8 @@ impl Keymap {
             ("a", AwaitHighlight),
             ("c", Comment),
             ("x", RedactSelection),
+            ("gm", OpenMenu),
+            ("<F10>", OpenMenu),
             ("u", Undo),
             ("v", Visual { linewise: false }),
             ("V", Visual { linewise: true }),
@@ -483,8 +496,21 @@ mod tests {
             "gv still uses the g prefix"
         );
         km.unbind(&parse_sequence("gv").unwrap());
+        km.unbind(&parse_sequence("gm").unwrap());
         let mut st = KeyState::default();
         assert_eq!(feed_all(&mut st, &km, &["g"]), vec![Command::GotoLast]);
+    }
+
+    #[test]
+    fn key_for_prefers_short_plain_keys() {
+        let km = Keymap::default_normal();
+        assert_eq!(km.key_for(&Command::ScrollDown(1)).as_deref(), Some("j"));
+        assert_eq!(km.key_for(&Command::GotoFirst).as_deref(), Some("gg"));
+        assert_eq!(
+            km.key_for(&Command::ToggleRecolor).as_deref(),
+            Some("<C-r>")
+        );
+        assert_eq!(km.key_for(&Command::Write(None)), None);
     }
 
     #[test]

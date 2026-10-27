@@ -23,6 +23,7 @@ unambiguous (`toolbar`). Booleans also accept `:set toolbar` / `:set notoolbar`.
 | `font_size` | `14` | Size of that font, 6–72. Also scales the bars. |
 | `statusbar` | `true` | Show the status bar. |
 | `toolbar` | `false` | Show the toolbar (`<C-t>` toggles it). |
+| `menubar` | `true` | Show the File / Edit / View menu bar (`gm` opens it even when hidden). |
 | `start_maximised` | `true` | Open the window filling the screen's usable area. |
 | `recolor` | `false` | Start in recolor (dark) mode; `<C-r>` toggles. |
 | `auto_reload` | `true` | Reload the document when the file changes on disk. |
@@ -142,6 +143,10 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `toggle_help` | `?` |
 | `toggle_fullscreen` | `<C-F>` |
 | `toggle_recolor` | `<C-r>` |
+| `menu` | `gm`, `<F10>` (normal and visual mode) |
+| `toggle_menubar` | — (`:set menubar`) |
+| `edit_config` | — (`:config`) |
+| `properties` | — (`:info`) |
 | `toggle_outline` | `<Tab>` |
 | `reload` | `r` |
 | `source` | — |

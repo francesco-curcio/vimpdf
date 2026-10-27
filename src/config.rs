@@ -12,6 +12,9 @@ use crate::input::command::Command;
 use crate::input::keymap::{Keymap, parse_sequence};
 use crate::viewport::FitMode;
 
+/// The documented example config, used to create a config file on request.
+pub const EXAMPLE: &str = include_str!("../config.example.toml");
+
 /// An RGBA colour, from "#rrggbb" or "#rrggbbaa".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color(pub [u8; 4]);
@@ -67,6 +70,8 @@ pub struct Config {
     pub recolor: bool,
     /// Reload the document when the file changes on disk.
     pub auto_reload: bool,
+    /// Show the File / Edit / View menu bar.
+    pub menubar: bool,
     pub colors: Colors,
     pub scroll_step: f32,
     pub smooth_scroll: bool,
@@ -98,6 +103,7 @@ impl Default for Config {
             start_maximised: true,
             recolor: false,
             auto_reload: true,
+            menubar: true,
             colors: Colors {
                 page_background: c("#ffffff"),
                 recolor_dark: c("#1e1e1e"),
@@ -144,6 +150,7 @@ pub const OPTIONS: &[&str] = &[
     "ui.start_maximised",
     "ui.recolor",
     "ui.auto_reload",
+    "ui.menubar",
     "colors.page_background",
     "colors.recolor_dark",
     "colors.recolor_light",
@@ -312,6 +319,7 @@ impl Config {
             "ui.start_maximised" => self.start_maximised = as_bool(v)?,
             "ui.recolor" => self.recolor = as_bool(v)?,
             "ui.auto_reload" => self.auto_reload = as_bool(v)?,
+            "ui.menubar" => self.menubar = as_bool(v)?,
             "colors.page_background" => self.colors.page_background = as_color(v)?,
             "colors.recolor_dark" => self.colors.recolor_dark = as_color(v)?,
             "colors.recolor_light" => self.colors.recolor_light = as_color(v)?,
@@ -559,6 +567,17 @@ caret = "red"
         let (c, w) = Config::from_toml(text);
         assert!(w.is_empty(), "{w:?}");
         assert_eq!(c, Config::default());
+    }
+
+    #[test]
+    fn rebinding_changes_the_key_shown_in_menus() {
+        let (c, _) = Config::from_toml(
+            "[keys.normal]\n\"R\" = \"toggle_recolor\"\n\"<C-r>\" = \"\"\n\"<A-m>\" = \"menu\"",
+        );
+        let (km, w) = c.normal_keymap();
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(km.key_for(&Command::ToggleRecolor).as_deref(), Some("R"));
+        assert_eq!(km.key_for(&Command::OpenMenu).as_deref(), Some("gm"));
     }
 
     #[test]

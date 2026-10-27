@@ -109,6 +109,14 @@ pub enum Command {
     RedactMatches,
     /// Apply all redaction marks, writing a new file.
     ApplyRedactions(Option<PathBuf>),
+    /// Open the File menu (works with the menu bar hidden too).
+    OpenMenu,
+    ToggleMenubar,
+    /// Open the config file in the system's text editor (creating it from
+    /// the example if missing).
+    EditConfig,
+    /// Document properties window.
+    ToggleProperties,
     /// Open the `:` command line, optionally prefilled.
     EnterCommandLine(String),
     /// Open the `/` search line, optionally prefilled.
@@ -182,6 +190,10 @@ const SIMPLE: &[(&str, Command)] = &[
     ("undo", Command::Undo),
     ("toggle_annotations", Command::ToggleAnnotations),
     ("write", Command::Write(None)),
+    ("menu", Command::OpenMenu),
+    ("toggle_menubar", Command::ToggleMenubar),
+    ("edit_config", Command::EditConfig),
+    ("properties", Command::ToggleProperties),
     ("redact", Command::RedactSelection),
     ("redact_area", Command::RedactArea),
     ("redact_matches", Command::RedactMatches),
@@ -365,6 +377,8 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
         "redact" if rest.is_empty() => Command::ApplyRedactions(None),
         "redact" => Command::ApplyRedactions(Some(expand_tilde(rest))),
         "redact-matches" => Command::RedactMatches,
+        "properties" | "info" => Command::ToggleProperties,
+        "config" => Command::EditConfig,
         "o" | "open" | "e" | "edit" if rest.is_empty() => {
             return Err(format!(":{word} needs a file path"));
         }

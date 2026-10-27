@@ -43,6 +43,7 @@ pub struct DocView {
     scale: Option<(ScaleKey, Instant)>,
     pub links: Vec<Vec<PageLink>>,
     pub outline: Vec<OutlineItem>,
+    pub metadata: Vec<(&'static str, String)>,
     links_rx: Receiver<links::Navigation>,
     pub searcher: Searcher,
     /// Annotation edits (highlights, comments, redaction marks).
@@ -83,6 +84,7 @@ impl DocView {
             layout: Layout::new(&info.page_sizes, PAGE_GAP),
             links: vec![Vec::new(); info.page_count()],
             outline: Vec::new(),
+            metadata: info.metadata.clone(),
             path,
             renderer,
             textures: LruCache::new(CACHE_BUDGET),

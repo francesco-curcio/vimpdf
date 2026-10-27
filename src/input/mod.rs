@@ -56,6 +56,18 @@ fn key_token(key: Key, m: Modifiers) -> Option<String> {
         Key::End => Some("End"),
         Key::PageUp => Some("PageUp"),
         Key::PageDown => Some("PageDown"),
+        Key::F1 => Some("F1"),
+        Key::F2 => Some("F2"),
+        Key::F3 => Some("F3"),
+        Key::F4 => Some("F4"),
+        Key::F5 => Some("F5"),
+        Key::F6 => Some("F6"),
+        Key::F7 => Some("F7"),
+        Key::F8 => Some("F8"),
+        Key::F9 => Some("F9"),
+        Key::F10 => Some("F10"),
+        Key::F11 => Some("F11"),
+        Key::F12 => Some("F12"),
         _ => None,
     };
     let chorded = m.ctrl || m.alt || m.mac_cmd;
@@ -139,11 +151,21 @@ mod tests {
             key(Key::Space, Modifiers::SHIFT),
             Event::Text("G".into()),
             key(Key::Escape, Modifiers::NONE),
+            key(Key::F10, Modifiers::NONE),
         ];
         let toks = key_tokens(&events);
         assert_eq!(
             toks,
-            vec!["j", "<C-d>", "<C-F>", "<Space>", "<S-Space>", "G", "<Esc>"]
+            vec![
+                "j",
+                "<C-d>",
+                "<C-F>",
+                "<Space>",
+                "<S-Space>",
+                "G",
+                "<Esc>",
+                "<F10>"
+            ]
         );
         for t in &toks {
             assert_eq!(&keymap::parse_sequence(t).unwrap()[0], t);

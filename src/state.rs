@@ -117,6 +117,25 @@ impl FileState {
     }
 }
 
+/// Recently read files (newest first) that still exist, from the state files.
+pub fn recent(dir: &Path, limit: usize) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
+        .filter_map(|e| {
+            let modified = e.metadata().ok()?.modified().ok()?;
+            let table: Table = std::fs::read_to_string(e.path()).ok()?.parse().ok()?;
+            let path = PathBuf::from(table.get("path")?.as_str()?);
+            path.exists().then_some((modified, path))
+        })
+        .collect();
+    found.sort_by_key(|f| std::cmp::Reverse(f.0));
+    found.into_iter().map(|(_, p)| p).take(limit).collect()
+}
+
 /// The saved state of `doc` (a canonical path), if any.
 pub fn load(dir: &Path, doc: &Path) -> Option<FileState> {
     let text = std::fs::read_to_string(file_for(dir, doc)).ok()?;

@@ -178,6 +178,17 @@ selection → rectangles per page, the comment editor (`ui/comment.rs`), the
 panel (`ui/annotations.rs`), markers and hover tooltips, the quit/reload
 guards.
 
+## Menus
+
+`ui/menubar.rs` draws the menu bar and its menus by hand (not with egui's
+menu widgets) so they can be driven from the keyboard: `MenuState` holds the
+open menu, the highlighted entry and an open submenu, and `MenuState::key`
+implements vim-key navigation and underlined-letter shortcuts (unit-tested).
+`app/menu.rs` builds the menus from the current state every frame (enabled
+entries, check marks, recent files from the state directory, the highlight
+palette) and labels each entry with its current binding via
+`Keymap::key_for`, so config overrides show up.
+
 ## Config
 
 `config.rs`: every option goes through `Config::set(key, toml::Value)`, used
@@ -209,6 +220,7 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `annotate.rs` | Annotation editor thread: highlights, comments, redaction marks, undo, saving |
 | `app/annotations.rs`, `ui/annotations.rs`, `ui/comment.rs` | Annotations UI |
 | `app/redact.rs` | Redaction marks, area mode, applying |
+| `ui/menubar.rs`, `app/menu.rs` | Menu bar: widget + keyboard navigation, contents |
 | `welcome.rs` | The page shown when no document is open |
 | `scripts/` | App bundle and icon generation (macOS) |
 | `selection.rs` | Text positions, caret motions, selections, clean copying |
