@@ -1,0 +1,14 @@
+[package]
+name = "pdfv"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+description = "A keyboard-driven, vim-style PDF viewer"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+eframe = "0.37.0"
+mupdf = "0.8.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
