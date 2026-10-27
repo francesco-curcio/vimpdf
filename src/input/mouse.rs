@@ -21,9 +21,10 @@ pub fn handle(
     links: &[Vec<PageLink>],
 ) -> MouseOutput {
     let mut commands = Vec::new();
-    let (scroll, hover, clicked, click_pos) = ctx.input(|i| {
+    let (scroll, zoom, hover, clicked, click_pos) = ctx.input(|i| {
         (
             i.smooth_scroll_delta,
+            i.zoom_delta(),
             i.pointer.hover_pos(),
             i.pointer.primary_clicked(),
             i.pointer.interact_pos(),
@@ -36,6 +37,19 @@ pub fn handle(
         commands.push(Command::ScrollBy {
             dx: -scroll.x,
             dy: -scroll.y,
+        });
+    }
+
+    // Pinch, or Cmd/Ctrl + wheel (egui turns those into zoom, not scroll).
+    if zoom != 1.0 {
+        let anchor = hover
+            .filter(|p| view_rect.contains(*p))
+            .unwrap_or(view_rect.center())
+            - view_rect.min;
+        commands.push(Command::ZoomBy {
+            factor: zoom,
+            x: anchor.x,
+            y: anchor.y,
         });
     }
 

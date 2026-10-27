@@ -6,6 +6,7 @@
 //! that scrolled away are dropped before they start.
 
 pub mod cache;
+pub mod tiles;
 
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
@@ -15,7 +16,8 @@ use std::thread;
 use crossbeam_channel::{Receiver, Sender};
 use eframe::egui::ColorImage;
 
-use crate::document;
+use crate::document::{self, PixelRect};
+use tiles::TileId;
 
 /// A render scale (device pixels per PDF point) rounded to hundredths, so
 /// nearly identical scales share cache entries.
@@ -40,6 +42,9 @@ impl ScaleKey {
 pub struct RenderJob {
     pub page: usize,
     pub scale: ScaleKey,
+    pub tile: TileId,
+    /// Pixel region of the tile (derived from the fields above).
+    pub rect: PixelRect,
 }
 
 pub struct RenderResult {
@@ -134,8 +139,8 @@ impl Drop for Renderer {
 }
 
 fn worker(path: PathBuf, shared: Arc<Shared>, results: Sender<RenderResult>, wake: impl Fn()) {
-    let doc = match document::open(&path) {
-        Ok(doc) => doc,
+    let mut renderer = match document::PageRenderer::open(&path) {
+        Ok(r) => r,
         Err(err) => {
             tracing::error!("render worker cannot open document: {err:#}");
             return;
@@ -157,12 +162,15 @@ fn worker(path: PathBuf, shared: Arc<Shared>, results: Sender<RenderResult>, wak
         };
 
         let start = std::time::Instant::now();
-        let image = document::render_page(&doc, job.page, job.scale.scale())
+        let image = renderer
+            .render(job.page, job.scale.scale(), job.rect)
             .map(|p| ColorImage::from_rgb([p.width, p.height], &p.rgb))
             .map_err(|e| format!("{e:#}"));
         tracing::debug!(
             page = job.page,
             scale = job.scale.scale(),
+            col = job.tile.col,
+            row = job.tile.row,
             ms = start.elapsed().as_millis() as u64,
             "rendered"
         );
@@ -186,6 +194,13 @@ mod tests {
         RenderJob {
             page,
             scale: ScaleKey::from_scale(2.0),
+            tile: TileId { col: 0, row: 0 },
+            rect: PixelRect {
+                x: 0,
+                y: 0,
+                w: 10,
+                h: 10,
+            },
         }
     }
 

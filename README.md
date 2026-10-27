@@ -4,8 +4,8 @@ A keyboard-driven, vim-style PDF viewer written in Rust, tuned for reading
 scientific papers. Rendering is done by [MuPDF](https://mupdf.com/); the window
 and UI use [egui/eframe](https://github.com/emilk/egui).
 
-Status: early development (milestone M1 — continuous scrolling, vim motions,
-links). See
+Status: early development (milestone M2 — continuous scrolling, vim motions,
+links, zoom and fit modes). See
 [PLAN.md](PLAN.md) for the roadmap.
 
 ## Building
@@ -39,12 +39,17 @@ Counts work as in vim: `5j`, `3J`, `12G`.
 | `<C-f>` / `<C-b>`, `Space` / `Shift-Space`, `PageDown` / `PageUp` | Full screen down / up |
 | `J` / `K` | Next / previous page (snaps to page top) |
 | `gg` / `G`, `Home` / `End` | First page / end of document; `<n>G` or `<n>gg` goes to page n |
+| `+` / `-` | Zoom in / out (10% steps; `3+` zooms three steps) |
+| `=` | Zoom to 100% |
+| `s` | Fit width (kept when the window is resized) |
+| `a` | Fit page (kept when the window is resized) |
 | `Esc` | Cancel a pending count or key sequence |
 | `q` | Quit |
 
 | Mouse | Action |
 | --- | --- |
 | Wheel / two-finger scroll | Scroll |
+| Pinch, or `Cmd` + wheel | Zoom, anchored at the pointer |
 | Click a link | Follow it (internal links go to the target page; web and mail links open in the default browser) |
 
 Logging: `RUST_LOG=pdfv=debug ./target/release/pdfv paper.pdf` (`pdfv=trace`

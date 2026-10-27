@@ -161,6 +161,11 @@ impl Keymap {
             ("<Home>", GotoFirst),
             ("G", GotoLast),
             ("<End>", GotoLast),
+            ("+", ZoomIn(1)),
+            ("-", ZoomOut(1)),
+            ("=", ZoomReset),
+            ("s", FitWidth),
+            ("a", FitPage),
             ("<Esc>", Cancel),
             ("q", Quit),
         ] {

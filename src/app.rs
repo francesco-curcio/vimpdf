@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
@@ -15,6 +14,7 @@ use crate::input::{key_tokens, mouse};
 use crate::layout::Layout;
 use crate::links::{self, LinkTarget, PageLink};
 use crate::render::cache::LruCache;
+use crate::render::tiles;
 use crate::render::{RenderJob, Renderer, ScaleKey};
 use crate::viewport::Viewport;
 
@@ -26,9 +26,11 @@ const PAGE_MARGIN: f32 = 16.0;
 const PAGE_GAP: f32 = 8.0;
 /// Distance of one `j`/`k` step, in screen points.
 const SCROLL_STEP: f32 = 60.0;
-/// Pages rendered ahead in the scroll direction, and behind it.
-const PREFETCH_AHEAD: usize = 4;
-const PREFETCH_BEHIND: usize = 1;
+/// Zoom factor of one `+`/`-` step.
+const ZOOM_STEP: f32 = 1.1;
+/// After the zoom changes, wait this long for it to settle before rendering
+/// at the new scale (the old tiles are drawn scaled meanwhile).
+const RERENDER_DELAY: Duration = Duration::from_millis(150);
 const CACHE_BUDGET: usize = 512 * 1024 * 1024;
 const MESSAGE_DURATION: Duration = Duration::from_secs(4);
 
@@ -39,6 +41,8 @@ pub struct PdfvApp {
     textures: LruCache<RenderJob, TextureHandle>,
     failed: HashSet<RenderJob>,
     last_queue: Vec<RenderJob>,
+    /// Render scale of the previous frame and when it last changed.
+    scale: Option<(ScaleKey, Instant)>,
     /// Direction of the last vertical movement, for prefetching.
     scrolling_up: bool,
     keymap: Keymap,
@@ -67,6 +71,7 @@ impl PdfvApp {
             textures: LruCache::new(CACHE_BUDGET),
             failed: HashSet::new(),
             last_queue: Vec::new(),
+            scale: None,
             scrolling_up: false,
             keymap: Keymap::default_normal(),
             keys: KeyState::default(),
@@ -78,7 +83,7 @@ impl PdfvApp {
 
     fn show_message(&mut self, msg: impl Into<String>) {
         let msg = msg.into();
-        tracing::info!("{msg}");
+        tracing::debug!("{msg}");
         self.message = Some((msg, Instant::now()));
     }
 
@@ -88,6 +93,7 @@ impl PdfvApp {
         };
         let layout = &self.layout;
         let screen = vp.height;
+        let (cx, cy) = (vp.width / 2.0, vp.height / 2.0);
         match cmd {
             Command::ScrollDown(n) => vp.scroll_by(0.0, n as f32 * SCROLL_STEP),
             Command::ScrollUp(n) => vp.scroll_by(0.0, -(n as f32) * SCROLL_STEP),
@@ -103,6 +109,12 @@ impl PdfvApp {
             Command::GotoFirst => vp.y = 0.0,
             Command::GotoLast => vp.goto_end(layout),
             Command::GotoPage(n) => vp.goto_page(layout, n.saturating_sub(1)),
+            Command::ZoomIn(n) => vp.zoom_by(ZOOM_STEP.powi(n as i32), cx, cy),
+            Command::ZoomOut(n) => vp.zoom_by(ZOOM_STEP.powi(-(n as i32)), cx, cy),
+            Command::ZoomReset => vp.zoom_to(1.0, cx, cy),
+            Command::ZoomBy { factor, x, y } => vp.zoom_by(factor, x, y),
+            Command::FitWidth => vp.fit_width(layout, PAGE_MARGIN),
+            Command::FitPage => vp.fit_page(layout, PAGE_MARGIN),
             Command::FollowLink(LinkTarget::Internal { page, .. }) => {
                 // Exact destination positions come with the jumplist (M5).
                 vp.goto_page(layout, page);
@@ -118,24 +130,22 @@ impl PdfvApp {
 
     fn receive_results(&mut self, ctx: &egui::Context) {
         while let Some(result) = self.renderer.try_recv() {
+            let job = result.job;
             match result.image {
                 Ok(image) => {
                     let bytes = image.pixels.len() * 4;
-                    let tex = ctx.load_texture(
-                        format!("page-{}", result.job.page),
-                        image,
-                        TextureOptions::LINEAR,
-                    );
-                    self.textures.insert(result.job, tex, bytes);
-                    tracing::debug!(
+                    let name = format!("p{}-{}-{}", job.page, job.tile.col, job.tile.row);
+                    let tex = ctx.load_texture(name, image, TextureOptions::LINEAR);
+                    self.textures.insert(job, tex, bytes);
+                    tracing::trace!(
                         textures = self.textures.len(),
                         mb = self.textures.used_bytes() / (1024 * 1024),
                         "texture cache"
                     );
                 }
                 Err(err) => {
-                    tracing::error!(page = result.job.page, "render failed: {err}");
-                    self.failed.insert(result.job);
+                    tracing::error!(page = job.page, "render failed: {err}");
+                    self.failed.insert(job);
                 }
             }
         }
@@ -144,50 +154,93 @@ impl PdfvApp {
         }
     }
 
-    fn schedule(&mut self, vp: &Viewport, scale: ScaleKey) {
-        let visible = self.layout.pages_in(vp.y, vp.y + vp.doc_height());
-        let jobs: Vec<RenderJob> = render_order(visible, self.layout.len(), self.scrolling_up)
-            .into_iter()
-            .map(|page| RenderJob { page, scale })
-            .filter(|j| !self.textures.contains(j) && !self.failed.contains(j))
-            .collect();
+    /// Queue tiles to render, unless the zoom is still changing.
+    fn schedule(&mut self, ctx: &egui::Context, vp: &Viewport, scale: ScaleKey) {
+        let changed = match self.scale {
+            Some((prev, _)) if prev == scale => false,
+            _ => {
+                self.scale = Some((scale, Instant::now()));
+                true
+            }
+        };
+        let since = self.scale.map_or(Duration::MAX, |(_, t)| t.elapsed());
+        let first_render = self.textures.len() == 0;
+
+        let jobs: Vec<RenderJob> = if since < RERENDER_DELAY && !first_render {
+            if changed {
+                tracing::trace!(scale = scale.scale(), "waiting for zoom to settle");
+            }
+            ctx.request_repaint_after(RERENDER_DELAY - since);
+            Vec::new()
+        } else {
+            tiles::plan(&self.layout, vp, scale, self.scrolling_up)
+                .into_iter()
+                .filter(|j| !self.textures.contains(j) && !self.failed.contains(j))
+                .collect()
+        };
         if jobs != self.last_queue {
             self.renderer.set_queue(jobs.iter().copied());
             self.last_queue = jobs;
         }
     }
 
-    /// The cached render of `page` closest to `scale`, for drawing while the
-    /// sharp one is pending.
-    fn fallback_texture(&mut self, page: usize, scale: ScaleKey) -> Option<egui::TextureId> {
-        let key = self
-            .textures
-            .keys()
-            .filter(|k| k.page == page)
-            .min_by_key(|k| k.scale.distance(scale))
-            .copied()?;
-        self.textures.get(&key).map(|t| t.id())
-    }
-
     fn draw_pages(&mut self, painter: &egui::Painter, area: Rect, vp: &Viewport, scale: ScaleKey) {
         let ppp = painter.ctx().pixels_per_point();
         let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+        let visible = tiles::visible_tiles(&self.layout, vp, scale);
+
         for page in self.layout.pages_in(vp.y, vp.y + vp.doc_height()) {
             let r = self.layout.page(page);
             let (vx, vy) = vp.to_view(r.x, r.y);
-            let min = area.min + Vec2::new(vx, vy);
+            // Tiles are positioned from the page corner, which sits on the
+            // pixel grid so that 1:1 tiles are not resampled and don't seam.
+            let min = snap_to_pixels(area.min + Vec2::new(vx, vy), ppp);
             let page_rect = Rect::from_min_size(min, Vec2::new(r.w, r.h) * vp.zoom);
+            painter.rect_filled(page_rect, 0.0, Color32::WHITE);
 
-            let exact = RenderJob { page, scale };
-            if let Some(tex) = self.textures.get(&exact) {
-                // Draw 1:1 on the physical pixel grid so it is not resampled.
-                let rect = snap_to_pixels(Rect::from_min_size(min, tex.size_vec2() / ppp), ppp);
+            let wanted: Vec<&RenderJob> = visible.iter().filter(|j| j.page == page).collect();
+            let complete = wanted.iter().all(|j| self.textures.contains(j));
+
+            // Until all sharp tiles are in, draw the nearest other scale
+            // stretched underneath.
+            let mut drew_any = false;
+            if !complete && let Some(other) = self.fallback_scale(page, scale) {
+                let ratio = vp.zoom / other.scale();
+                let keys: Vec<RenderJob> = self
+                    .textures
+                    .keys()
+                    .filter(|k| k.page == page && k.scale == other)
+                    .copied()
+                    .collect();
+                for key in keys {
+                    let Some(tex) = self.textures.get(&key) else {
+                        continue;
+                    };
+                    let rect = Rect::from_min_size(
+                        min + Vec2::new(key.rect.x as f32, key.rect.y as f32) * ratio,
+                        Vec2::new(key.rect.w as f32, key.rect.h as f32) * ratio,
+                    );
+                    if rect.intersects(area) {
+                        painter.image(tex.id(), rect, uv, Color32::WHITE);
+                        drew_any = true;
+                    }
+                }
+            }
+
+            for job in wanted {
+                let Some(tex) = self.textures.get(job) else {
+                    continue;
+                };
+                let rect = Rect::from_min_size(
+                    min + Vec2::new(job.rect.x as f32, job.rect.y as f32) / ppp,
+                    Vec2::new(job.rect.w as f32, job.rect.h as f32) / ppp,
+                );
                 painter.image(tex.id(), rect, uv, Color32::WHITE);
-            } else if let Some(tex) = self.fallback_texture(page, scale) {
-                painter.image(tex, page_rect, uv, Color32::WHITE);
-            } else {
+                drew_any = true;
+            }
+
+            if !drew_any {
                 tracing::trace!(page, "drawing placeholder");
-                painter.rect_filled(page_rect, 0.0, Color32::WHITE);
                 painter.text(
                     page_rect.center(),
                     Align2::CENTER_CENTER,
@@ -198,23 +251,15 @@ impl PdfvApp {
             }
         }
     }
-}
 
-/// Visible pages first, then pages ahead in the scroll direction, then behind.
-fn render_order(visible: Range<usize>, page_count: usize, up: bool) -> Vec<usize> {
-    let below = (visible.end..page_count).take(if up { PREFETCH_BEHIND } else { PREFETCH_AHEAD });
-    let above = (0..visible.start)
-        .rev()
-        .take(if up { PREFETCH_AHEAD } else { PREFETCH_BEHIND });
-    let mut pages: Vec<usize> = visible.collect();
-    if up {
-        pages.extend(above);
-        pages.extend(below);
-    } else {
-        pages.extend(below);
-        pages.extend(above);
+    /// The cached scale of `page` closest to `scale`, other than `scale`.
+    fn fallback_scale(&self, page: usize, scale: ScaleKey) -> Option<ScaleKey> {
+        self.textures
+            .keys()
+            .filter(|k| k.page == page && k.scale != scale)
+            .map(|k| k.scale)
+            .min_by_key(|s| s.distance(scale))
     }
-    pages
 }
 
 fn thread_count() -> usize {
@@ -222,13 +267,9 @@ fn thread_count() -> usize {
     (cores / 2).clamp(2, 4)
 }
 
-/// Move a rect so its top-left corner sits on a physical pixel, keeping its size.
-fn snap_to_pixels(rect: Rect, ppp: f32) -> Rect {
-    let min = Pos2::new(
-        (rect.min.x * ppp).round() / ppp,
-        (rect.min.y * ppp).round() / ppp,
-    );
-    Rect::from_min_size(min, rect.size())
+/// Round a position to the nearest physical pixel.
+fn snap_to_pixels(pos: Pos2, ppp: f32) -> Pos2 {
+    Pos2::new((pos.x * ppp).round() / ppp, (pos.y * ppp).round() / ppp)
 }
 
 impl eframe::App for PdfvApp {
@@ -244,7 +285,7 @@ impl eframe::App for PdfvApp {
         });
         if (vp.width, vp.height) != (area.width(), area.height()) {
             vp.resize(area.width(), area.height());
-            vp.fit_width(layout, PAGE_MARGIN);
+            vp.refit(layout, PAGE_MARGIN);
         }
 
         // Input → commands.
@@ -255,7 +296,7 @@ impl eframe::App for PdfvApp {
             .collect();
         let mouse = mouse::handle(&ctx, area, vp, &self.layout, &self.links);
         commands.extend(mouse.commands);
-        let y_before = vp.y;
+        let (y_before, zoom_before) = (vp.y, vp.zoom);
         for cmd in commands {
             tracing::trace!(?cmd, "command");
             self.execute(cmd, &ctx);
@@ -270,10 +311,14 @@ impl eframe::App for PdfvApp {
             tracing::trace!(page = vp.current_page(&self.layout) + 1, y = vp.y, "moved");
         }
         let vp = vp.clone();
+        if vp.zoom != zoom_before {
+            // Until the status bar exists (M3).
+            self.show_message(format!("Zoom {:.0}%", vp.zoom * 100.0));
+        }
 
         self.receive_results(&ctx);
         let scale = ScaleKey::from_scale(vp.zoom * ctx.pixels_per_point());
-        self.schedule(&vp, scale);
+        self.schedule(&ctx, &vp, scale);
 
         let painter = ui.painter().clone();
         painter.rect_filled(area, 0.0, BACKGROUND);
@@ -303,21 +348,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn render_order_prefers_scroll_direction() {
-        assert_eq!(render_order(3..5, 20, false), vec![3, 4, 5, 6, 7, 8, 2]);
-        assert_eq!(render_order(3..5, 20, true), vec![3, 4, 2, 1, 0, 5]);
-        assert_eq!(render_order(18..20, 20, false), vec![18, 19, 17]);
-        // Viewport inside a gap: nothing visible, still prefetch around it.
-        assert_eq!(render_order(5..5, 20, false), vec![5, 6, 7, 8, 4]);
-    }
-
-    #[test]
     fn snap_to_pixels_aligns_on_retina() {
-        let r = snap_to_pixels(
-            Rect::from_min_size(Pos2::new(10.3, 5.8), Vec2::splat(4.0)),
-            2.0,
+        assert_eq!(
+            snap_to_pixels(Pos2::new(10.3, 5.8), 2.0),
+            Pos2::new(10.5, 6.0)
         );
-        assert_eq!(r.min, Pos2::new(10.5, 6.0));
-        assert_eq!(r.size(), Vec2::splat(4.0));
     }
 }

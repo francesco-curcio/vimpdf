@@ -23,6 +23,20 @@ pub enum Command {
     GotoLast,
     /// 1-based page number.
     GotoPage(usize),
+    /// Zoom in / out by `n` steps, anchored at the view centre.
+    ZoomIn(u32),
+    ZoomOut(u32),
+    /// Zoom to 100%.
+    ZoomReset,
+    /// Multiply the zoom, anchored at a point in view coordinates
+    /// (pinch / Cmd+wheel).
+    ZoomBy {
+        factor: f32,
+        x: f32,
+        y: f32,
+    },
+    FitWidth,
+    FitPage,
     FollowLink(LinkTarget),
     Cancel,
     Quit,
@@ -42,6 +56,8 @@ impl Command {
             ScreenDown(k) => ScreenDown(k * n),
             ScreenUp(k) => ScreenUp(k * n),
             NextPage(k) => NextPage(k * n),
+            ZoomIn(k) => ZoomIn(k * n),
+            ZoomOut(k) => ZoomOut(k * n),
             PrevPage(k) => PrevPage(k * n),
             GotoFirst | GotoLast | GotoPage(_) => GotoPage(n as usize),
             other => other,

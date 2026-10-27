@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use mupdf::{Colorspace, DestinationKind, Document, Matrix};
+use mupdf::{Colorspace, DestinationKind, Device, DisplayList, Document, Matrix, Pixmap, Rect};
 
 use crate::links::{LinkTarget, PageLink};
 
@@ -141,7 +141,7 @@ pub fn open(path: &Path) -> Result<Document> {
     Ok(doc)
 }
 
-/// A rendered page as tightly packed RGB bytes.
+/// A rendered region as tightly packed RGB bytes.
 #[derive(Debug)]
 pub struct RenderedPage {
     pub width: usize,
@@ -149,16 +149,90 @@ pub struct RenderedPage {
     pub rgb: Vec<u8>,
 }
 
-/// Render a whole page at `scale` device pixels per PDF point.
-pub fn render_page(doc: &Document, page: usize, scale: f32) -> Result<RenderedPage> {
-    let page = doc
-        .load_page(page as i32)
-        .with_context(|| format!("cannot load page {}", page + 1))?;
-    let ctm = Matrix::new_scale(scale, scale);
-    let pixmap = page
-        .to_pixmap(&ctm, &Colorspace::device_rgb(), false, true)
-        .context("rendering failed")?;
+/// A region of a rendered page, in device pixels from the page's top-left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PixelRect {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+}
 
+/// Display lists kept per renderer: rendering several tiles of one page then
+/// interprets the page's content only once.
+const DISPLAY_LISTS: usize = 6;
+
+/// Renders regions of pages. Owns its `Document`, so one per thread.
+pub struct PageRenderer {
+    doc: Document,
+    /// Most recently used last.
+    lists: Vec<(usize, DisplayList, Rect)>,
+}
+
+impl PageRenderer {
+    pub fn open(path: &Path) -> Result<Self> {
+        Ok(Self {
+            doc: open(path)?,
+            lists: Vec::new(),
+        })
+    }
+
+    fn display_list(&mut self, page: usize) -> Result<&(usize, DisplayList, Rect)> {
+        if let Some(i) = self.lists.iter().position(|(p, _, _)| *p == page) {
+            let entry = self.lists.remove(i);
+            self.lists.push(entry);
+        } else {
+            let p = self
+                .doc
+                .load_page(page as i32)
+                .with_context(|| format!("cannot load page {}", page + 1))?;
+            let bounds = p.bounds()?;
+            let list = p.to_display_list(true)?;
+            if self.lists.len() == DISPLAY_LISTS {
+                self.lists.remove(0);
+            }
+            self.lists.push((page, list, bounds));
+        }
+        Ok(self.lists.last().expect("just pushed"))
+    }
+
+    /// Render `region` of `page` at `scale` device pixels per PDF point.
+    pub fn render(&mut self, page: usize, scale: f32, region: PixelRect) -> Result<RenderedPage> {
+        let (_, list, bounds) = self.display_list(page)?;
+        // Map the page's top-left corner to device pixel (0, 0).
+        let ctm = Matrix::new(
+            scale,
+            0.0,
+            0.0,
+            scale,
+            -bounds.x0 * scale,
+            -bounds.y0 * scale,
+        );
+        let mut pixmap = Pixmap::new(
+            &Colorspace::device_rgb(),
+            region.x as i32,
+            region.y as i32,
+            region.w as i32,
+            region.h as i32,
+            false,
+        )?;
+        pixmap.clear_with(255)?;
+        {
+            let device = Device::from_pixmap(&pixmap)?;
+            let area = Rect {
+                x0: region.x as f32,
+                y0: region.y as f32,
+                x1: (region.x + region.w) as f32,
+                y1: (region.y + region.h) as f32,
+            };
+            list.run(&device, &ctm, area).context("rendering failed")?;
+            // Dropping the device closes it, flushing all drawing.
+        }
+        pixmap_to_rgb(&pixmap)
+    }
+}
+
+fn pixmap_to_rgb(pixmap: &Pixmap) -> Result<RenderedPage> {
     let width = pixmap.width() as usize;
     let height = pixmap.height() as usize;
     let n = pixmap.n() as usize;
@@ -195,15 +269,37 @@ mod tests {
         let path = std::env::var("PDFV_TEST_PDF").expect("set PDFV_TEST_PDF");
         let path = Path::new(&path);
         let info = DocInfo::load(path).unwrap();
-        let doc = open(path).unwrap();
+        let mut renderer = PageRenderer::open(path).unwrap();
 
         let scale = 2.0;
-        let page = render_page(&doc, 0, scale).unwrap();
         let size = info.page_sizes[0];
-        assert_eq!(page.width, (size.width * scale).ceil() as usize);
-        assert_eq!(page.height, (size.height * scale).ceil() as usize);
+        let (w, h) = (
+            (size.width * scale).ceil() as u32,
+            (size.height * scale).ceil() as u32,
+        );
+        let whole = PixelRect { x: 0, y: 0, w, h };
+        let page = renderer.render(0, scale, whole).unwrap();
+        assert_eq!((page.width, page.height), (w as usize, h as usize));
         assert_eq!(page.rgb.len(), page.width * page.height * 3);
         assert!(page.rgb.iter().any(|&b| b < 128), "page is blank");
+
+        // A tile must match the same region of the whole-page render.
+        let tile = PixelRect {
+            x: 300,
+            y: 400,
+            w: 200,
+            h: 100,
+        };
+        let part = renderer.render(0, scale, tile).unwrap();
+        for row in 0..tile.h as usize {
+            let src = ((tile.y as usize + row) * page.width + tile.x as usize) * 3;
+            let dst = row * tile.w as usize * 3;
+            assert_eq!(
+                &page.rgb[src..src + tile.w as usize * 3],
+                &part.rgb[dst..dst + tile.w as usize * 3],
+                "tile row {row} differs"
+            );
+        }
 
         let links = load_all_links(path).unwrap();
         assert_eq!(links.len(), info.page_count());
