@@ -82,6 +82,10 @@ pub enum Command {
     ToggleToolbar,
     ToggleHelp,
     ToggleFullscreen,
+    /// Dark mode: render with the recolor palette.
+    ToggleRecolor,
+    /// Table of contents panel.
+    ToggleOutline,
     /// Re-open the current file, keeping the position.
     Reload,
     Open(PathBuf),
@@ -139,6 +143,8 @@ const SIMPLE: &[(&str, Command)] = &[
     ("toggle_toolbar", Command::ToggleToolbar),
     ("toggle_help", Command::ToggleHelp),
     ("toggle_fullscreen", Command::ToggleFullscreen),
+    ("toggle_recolor", Command::ToggleRecolor),
+    ("toggle_outline", Command::ToggleOutline),
     ("reload", Command::Reload),
     ("source", Command::Source),
     ("cancel", Command::Cancel),

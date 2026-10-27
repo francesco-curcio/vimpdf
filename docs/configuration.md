@@ -24,6 +24,8 @@ unambiguous (`toolbar`). Booleans also accept `:set toolbar` / `:set notoolbar`.
 | `statusbar` | `true` | Show the status bar. |
 | `toolbar` | `false` | Show the toolbar (`<C-t>` toggles it). |
 | `start_maximised` | `true` | Open the window filling the screen's usable area. |
+| `recolor` | `false` | Start in recolor (dark) mode; `<C-r>` toggles. |
+| `auto_reload` | `true` | Reload the document when the file changes on disk. |
 
 ### `[colors]`
 
@@ -32,12 +34,12 @@ Colours are `"#rrggbb"` or `"#rrggbbaa"`.
 | Option | Default | Used for |
 | --- | --- | --- |
 | `page_background` | `"#ffffff"` | Page colour shown while a page is still rendering. |
-| `recolor_dark` | `"#1e1e1e"` | Background in recolor (dark) mode — M7. |
-| `recolor_light` | `"#d4d4d4"` | Text in recolor mode — M7. |
-| `search_highlight` | `"#f9e2af80"` | Search matches — M4. |
-| `selection` | `"#89b4fa60"` | Text selection — M6. |
-| `caret` | `"#f38ba8"` | Visual-mode caret — M6. |
-| `hint_background` | `"#fab387"` | Link / word hint labels — M5. |
+| `recolor_dark` | `"#1e1e1e"` | Page background in recolor (dark) mode: white maps here. |
+| `recolor_light` | `"#d4d4d4"` | Text colour in recolor mode: black maps here (other colours in between, by lightness). |
+| `search_highlight` | `"#f9e2af80"` | Search matches. |
+| `selection` | `"#89b4fa60"` | Text selection. |
+| `caret` | `"#f38ba8"` | Visual-mode caret. |
+| `hint_background` | `"#fab387"` | Link / word hint labels (and the current search match). |
 
 ### `[scroll]`
 
@@ -62,8 +64,7 @@ Colours are `"#rrggbb"` or `"#rrggbbaa"`.
 | `pan_modifier` | `"alt"` | Holding it swaps the drag behaviour (pans when `drag = "select"`, selects when `"pan"`). Middle-drag always pans. |
 | `copy_on_select` | `false` | Copy mouse selections to the clipboard as soon as the drag ends. |
 
-Options marked with a milestone are accepted now and take effect when that
-feature lands.
+
 
 ## Key bindings
 
@@ -121,6 +122,8 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `toggle_toolbar`, `toggle_statusbar` | `<C-t>`, — |
 | `toggle_help` | `?` |
 | `toggle_fullscreen` | `<C-F>` |
+| `toggle_recolor` | `<C-r>` |
+| `toggle_outline` | `<Tab>` |
 | `reload` | `r` |
 | `source` | — |
 | `open <path>` | — |

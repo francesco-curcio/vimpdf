@@ -9,7 +9,7 @@ Status: in development — see [PLAN.md](PLAN.md) for the roadmap. Done so far:
 continuous scrolling, vim motions with counts, links, zoom and fit modes,
 status bar, `:` command line, config file, toolbar, help overlay, search,
 link hints, jumplist and marks, text selection with vim visual mode and the
-mouse.
+mouse, recolor (dark mode), outline panel, remembered positions, auto-reload.
 
 Documentation:
 
@@ -77,6 +77,8 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `gv` | Word hints: a label on every word on screen; typing one starts visual mode there |
 | `:` | Command line |
 | `?` | Help overlay: active keys, mouse actions, commands |
+| `<Tab>` | Outline (table of contents) panel |
+| `<C-r>` | Toggle recolor (dark mode) |
 | `<C-t>` | Toggle the toolbar |
 | `<C-F>` | Toggle fullscreen |
 | `r` | Reload the document, keeping the position |
@@ -98,6 +100,7 @@ Every mouse action also has a key.
 | `Alt` + drag, middle drag | Pan | `h` `j` `k` `l` |
 | Right click | Menu: copy, search for selection, open link, copy link address | `y`, `*`, `f`, `yf` |
 | Click the page number in the status bar | Go to page | `:<n>` |
+| Click an outline entry | Jump to it (panel stays open) | `<Tab>`, `j`/`k`, Enter |
 | Toolbar buttons | Zoom, fit, go to page, help | `+` `-` `s` `a` `:<n>` `?` |
 
 Internal links jump to the exact destination (a citation lands on the
@@ -181,6 +184,24 @@ Known limitations:
 - Mathematics usually copies poorly: many PDFs encode math glyphs in ways that
   don't map back to sensible characters (e.g. `410þ160 −180` for 410⁺¹⁶⁰₋₁₈₀).
 - Scanned PDFs without a text layer have nothing to select or search.
+
+### Reading comfort
+
+- **Recolor** (`<C-r>`): pages are drawn with light text on a dark background
+  (`colors.recolor_dark` / `colors.recolor_light`). `ui.recolor = true` starts
+  in this mode.
+- **Outline** (`<Tab>`): the document's table of contents, opened at the
+  section you're reading. `j`/`k` (or arrows, `<C-d>`/`<C-u>`, `g`/`G`) move,
+  Enter (or `l`, `o`, Space) jumps and closes, `Esc`/`<Tab>`/`q`/`h` close.
+  Clicking an entry jumps and keeps the panel open. Jumps go into the
+  jumplist (`<C-o>` returns).
+- **Remembered position**: the page, offset, zoom, fit mode and marks of every
+  file are saved (on quit, when opening another file, and every few seconds)
+  in `~/.local/state/pdfv/` (or `$XDG_STATE_HOME/pdfv/`) and restored when the
+  file is opened again.
+- **Auto-reload**: when the file changes on disk (e.g. LaTeX recompiles it),
+  the view reloads in place once the file has stopped changing for 300 ms,
+  keeping the position. `ui.auto_reload = false` turns it off.
 
 ### Status bar
 

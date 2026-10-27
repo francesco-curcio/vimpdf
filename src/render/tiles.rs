@@ -5,7 +5,7 @@ use crate::document::PixelRect;
 use crate::layout::Layout;
 use crate::viewport::Viewport;
 
-use super::{RenderJob, ScaleKey};
+use super::{Recolor, RenderJob, ScaleKey};
 
 /// Tile edge in device pixels.
 pub const TILE_SIZE: u32 = 1024;
@@ -70,7 +70,13 @@ struct Region {
 
 /// Tiles of every page intersecting `region`, pages in order (reversed when
 /// `reverse`, so the nearest page comes first while scrolling up).
-fn tiles_in(layout: &Layout, scale: ScaleKey, region: Region, reverse: bool) -> Vec<RenderJob> {
+fn tiles_in(
+    layout: &Layout,
+    scale: ScaleKey,
+    recolor: Option<Recolor>,
+    region: Region,
+    reverse: bool,
+) -> Vec<RenderJob> {
     let s = scale.scale();
     let mut pages: Vec<usize> = layout.pages_in(region.y0, region.y1).collect();
     if reverse {
@@ -93,6 +99,7 @@ fn tiles_in(layout: &Layout, scale: ScaleKey, region: Region, reverse: bool) -> 
         jobs.extend(tiles.into_iter().map(|tile| RenderJob {
             page,
             scale,
+            recolor,
             tile,
             rect: tile_rect(page_px, tile),
         }));
@@ -101,19 +108,30 @@ fn tiles_in(layout: &Layout, scale: ScaleKey, region: Region, reverse: bool) -> 
 }
 
 /// Tiles visible in `vp`, in drawing order.
-pub fn visible_tiles(layout: &Layout, vp: &Viewport, scale: ScaleKey) -> Vec<RenderJob> {
+pub fn visible_tiles(
+    layout: &Layout,
+    vp: &Viewport,
+    scale: ScaleKey,
+    recolor: Option<Recolor>,
+) -> Vec<RenderJob> {
     let view = Region {
         x0: vp.x,
         y0: vp.y,
         x1: vp.x + vp.doc_width(),
         y1: vp.y + vp.doc_height(),
     };
-    tiles_in(layout, scale, view, false)
+    tiles_in(layout, scale, recolor, view, false)
 }
 
 /// Everything worth rendering, highest priority first: the visible tiles,
 /// then a margin to the sides, then ahead in the scroll direction, then behind.
-pub fn plan(layout: &Layout, vp: &Viewport, scale: ScaleKey, scrolling_up: bool) -> Vec<RenderJob> {
+pub fn plan(
+    layout: &Layout,
+    vp: &Viewport,
+    scale: ScaleKey,
+    recolor: Option<Recolor>,
+    scrolling_up: bool,
+) -> Vec<RenderJob> {
     let (w, h) = (vp.doc_width(), vp.doc_height());
     let (x0, x1) = (vp.x - SIDE_SCREENS * w, vp.x + w + SIDE_SCREENS * w);
     let (top, bottom) = (vp.y, vp.y + h);
@@ -131,20 +149,38 @@ pub fn plan(layout: &Layout, vp: &Viewport, scale: ScaleKey, scrolling_up: bool)
         y1: top,
     };
 
-    let mut jobs = visible_tiles(layout, vp, scale);
+    let mut jobs = visible_tiles(layout, vp, scale, recolor);
     let sides = Region {
         x0,
         y0: top,
         x1,
         y1: bottom,
     };
-    jobs.extend(tiles_in(layout, scale, sides, false));
+    jobs.extend(tiles_in(layout, scale, recolor, sides, false));
     if scrolling_up {
-        jobs.extend(tiles_in(layout, scale, above(AHEAD_SCREENS), true));
-        jobs.extend(tiles_in(layout, scale, below(BEHIND_SCREENS), false));
+        jobs.extend(tiles_in(layout, scale, recolor, above(AHEAD_SCREENS), true));
+        jobs.extend(tiles_in(
+            layout,
+            scale,
+            recolor,
+            below(BEHIND_SCREENS),
+            false,
+        ));
     } else {
-        jobs.extend(tiles_in(layout, scale, below(AHEAD_SCREENS), false));
-        jobs.extend(tiles_in(layout, scale, above(BEHIND_SCREENS), true));
+        jobs.extend(tiles_in(
+            layout,
+            scale,
+            recolor,
+            below(AHEAD_SCREENS),
+            false,
+        ));
+        jobs.extend(tiles_in(
+            layout,
+            scale,
+            recolor,
+            above(BEHIND_SCREENS),
+            true,
+        ));
     }
 
     let mut seen = std::collections::HashSet::new();
@@ -208,15 +244,15 @@ mod tests {
         vp.goto_page(&layout, 3);
 
         let scale = ScaleKey::from_scale(2.0);
-        let visible = visible_tiles(&layout, &vp, scale);
+        let visible = visible_tiles(&layout, &vp, scale, None);
         assert!(visible.iter().all(|j| j.page == 3));
 
-        let down = plan(&layout, &vp, scale, false);
+        let down = plan(&layout, &vp, scale, None, false);
         assert_eq!(&down[..visible.len()], &visible[..]);
         let first_other = down.iter().find(|j| j.page != 3).unwrap();
         assert_eq!(first_other.page, 4, "scrolling down prefetches below first");
 
-        let up = plan(&layout, &vp, scale, true);
+        let up = plan(&layout, &vp, scale, None, true);
         let first_other = up.iter().find(|j| j.page != 3).unwrap();
         assert_eq!(first_other.page, 2, "scrolling up prefetches above first");
 

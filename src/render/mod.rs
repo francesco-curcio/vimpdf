@@ -38,10 +38,31 @@ impl ScaleKey {
     }
 }
 
+/// Recolor (dark mode): white becomes `dark`, black becomes `light`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Recolor {
+    pub dark: [u8; 3],
+    pub light: [u8; 3],
+}
+
+/// Map each RGB pixel's lightness onto the dark → light range (inverted).
+pub fn recolor(rgb: &mut [u8], rc: Recolor) {
+    let (pixels, _) = rgb.as_chunks_mut::<3>();
+    for px in pixels {
+        let [r, g, b] = px.map(u32::from);
+        let lum = (299 * r + 587 * g + 114 * b) / 1000;
+        let t = 255 - lum; // 0 for white, 255 for black
+        for (c, (d, l)) in px.iter_mut().zip(rc.dark.into_iter().zip(rc.light)) {
+            *c = ((u32::from(d) * (255 - t) + u32::from(l) * t) / 255) as u8;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RenderJob {
     pub page: usize,
     pub scale: ScaleKey,
+    pub recolor: Option<Recolor>,
     pub tile: TileId,
     /// Pixel region of the tile (derived from the fields above).
     pub rect: PixelRect,
@@ -164,7 +185,12 @@ fn worker(path: PathBuf, shared: Arc<Shared>, results: Sender<RenderResult>, wak
         let start = std::time::Instant::now();
         let image = renderer
             .render(job.page, job.scale.scale(), job.rect)
-            .map(|p| ColorImage::from_rgb([p.width, p.height], &p.rgb))
+            .map(|mut p| {
+                if let Some(rc) = job.recolor {
+                    recolor(&mut p.rgb, rc);
+                }
+                ColorImage::from_rgb([p.width, p.height], &p.rgb)
+            })
             .map_err(|e| format!("{e:#}"));
         tracing::debug!(
             page = job.page,
@@ -194,6 +220,7 @@ mod tests {
         RenderJob {
             page,
             scale: ScaleKey::from_scale(2.0),
+            recolor: None,
             tile: TileId { col: 0, row: 0 },
             rect: PixelRect {
                 x: 0,
@@ -202,6 +229,19 @@ mod tests {
                 h: 10,
             },
         }
+    }
+
+    #[test]
+    fn recolor_inverts_lightness_into_the_palette() {
+        let rc = Recolor {
+            dark: [30, 30, 30],
+            light: [212, 212, 212],
+        };
+        let mut px = vec![255, 255, 255, 0, 0, 0, 128, 128, 128];
+        recolor(&mut px, rc);
+        assert_eq!(&px[0..3], &[30, 30, 30], "white paper becomes dark");
+        assert_eq!(&px[3..6], &[212, 212, 212], "black text becomes light");
+        assert!(px[6] > 30 && px[6] < 212);
     }
 
     #[test]

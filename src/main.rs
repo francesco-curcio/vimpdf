@@ -9,10 +9,12 @@ mod modes;
 mod render;
 mod search;
 mod selection;
+mod state;
 mod text;
 mod ui;
 mod view;
 mod viewport;
+mod watch;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

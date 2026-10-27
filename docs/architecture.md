@@ -71,6 +71,11 @@ stretched old tiles cover the gap. The texture cache is an LRU bounded at
 
 ## Input
 
+egui's own keyboard focus is released every frame unless a text field is
+being edited (`ctx.text_edit_focused()`), so Tab/Enter/Space never activate
+an egui widget behind pdfv's back; clickable labels use `Sense::CLICK`
+(not focusable).
+
 - `input/mod.rs` turns egui events into vim tokens: printable characters from
   text events (so they follow the keyboard layout), everything chorded or
   special from key events (`<C-d>`, `<S-Space>`).
@@ -122,6 +127,19 @@ keys until a label is complete. `jumplist.rs` keeps the jump history
 (browser-like: a new jump drops the forward entries) and the marks, both as
 page + offset positions. Every jump command records the position first.
 
+## Reading comfort
+
+- Recolor is part of the render job key (`render::Recolor`), so dark and
+  normal tiles are cached separately; the worker maps each pixel's lightness
+  onto the dark → light palette before upload.
+- The outline is read with the links (`document::load_links_and_outline`),
+  flattened with depths, and shown by `ui/outline.rs`; `app/reading.rs`
+  handles its keys.
+- `state.rs` stores per-file state as TOML under the state directory, named
+  by an FNV-1a hash of the canonical path (stable across Rust versions).
+- `watch.rs` watches the file's directory with `notify` (tools often replace
+  files by renaming); the app reloads 300 ms after the last change.
+
 ## Config
 
 `config.rs`: every option goes through `Config::set(key, toml::Value)`, used
@@ -145,6 +163,10 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `text.rs` | Page text model, matching, match rectangles |
 | `search.rs` | Search worker and result state |
 | `jumplist.rs` | Jump history and marks |
+| `state.rs` | Per-file saved position, zoom, fit, marks |
+| `watch.rs` | File change notifications |
+| `app/reading.rs` | Recolor, outline keys, state save/restore, auto-reload |
+| `ui/outline.rs` | Outline panel |
 | `selection.rs` | Text positions, caret motions, selections, clean copying |
 | `app/hints.rs`, `app/searching.rs`, `app/visual.rs` | App-side hint mode, search, visual mode and mouse selection |
 | `config.rs` | Options, TOML loading, `:set` |

@@ -67,6 +67,13 @@ impl JumpList {
         Some(pos)
     }
 
+    /// All marks, sorted by name (for saving).
+    pub fn marks(&self) -> Vec<(char, Position)> {
+        let mut marks: Vec<_> = self.marks.iter().map(|(c, p)| (*c, *p)).collect();
+        marks.sort_by_key(|(c, _)| *c);
+        marks
+    }
+
     pub fn set_mark(&mut self, c: char, pos: Position) {
         self.marks.insert(c, pos);
     }

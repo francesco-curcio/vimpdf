@@ -12,12 +12,12 @@ use eframe::egui::{
     self, Align2, Color32, FontId, Pos2, Rect, TextureHandle, TextureOptions, Vec2,
 };
 
-use crate::document::DocInfo;
+use crate::document::{DocInfo, OutlineItem};
 use crate::layout::Layout;
 use crate::links::{self, PageLink};
 use crate::render::cache::LruCache;
 use crate::render::tiles;
-use crate::render::{RenderJob, Renderer, ScaleKey};
+use crate::render::{Recolor, RenderJob, Renderer, ScaleKey};
 use crate::search::{SearchState, Searcher};
 use crate::selection::DocText;
 use crate::text::PageText;
@@ -41,7 +41,8 @@ pub struct DocView {
     /// Render scale of the previous frame and when it last changed.
     scale: Option<(ScaleKey, Instant)>,
     pub links: Vec<Vec<PageLink>>,
-    links_rx: Receiver<Vec<Vec<PageLink>>>,
+    pub outline: Vec<OutlineItem>,
+    links_rx: Receiver<links::Navigation>,
     pub searcher: Searcher,
     pub search: SearchState,
     /// Page text loaded so far (for selection and hit-testing).
@@ -74,6 +75,7 @@ impl DocView {
         Self {
             layout: Layout::new(&info.page_sizes, PAGE_GAP),
             links: vec![Vec::new(); info.page_count()],
+            outline: Vec::new(),
             path,
             renderer,
             textures: LruCache::new(CACHE_BUDGET),
@@ -147,8 +149,9 @@ impl DocView {
                 }
             }
         }
-        if let Ok(links) = self.links_rx.try_recv() {
+        if let Ok((links, outline)) = self.links_rx.try_recv() {
             self.links = links;
+            self.outline = outline;
         }
     }
 
@@ -158,6 +161,7 @@ impl DocView {
         ctx: &egui::Context,
         vp: &Viewport,
         scale: ScaleKey,
+        recolor: Option<Recolor>,
         scrolling_up: bool,
     ) {
         if self.scale.is_none_or(|(prev, _)| prev != scale) {
@@ -170,7 +174,7 @@ impl DocView {
             ctx.request_repaint_after(RERENDER_DELAY - since);
             Vec::new()
         } else {
-            tiles::plan(&self.layout, vp, scale, scrolling_up)
+            tiles::plan(&self.layout, vp, scale, recolor, scrolling_up)
                 .into_iter()
                 .filter(|j| !self.textures.contains(j) && !self.failed.contains(j))
                 .collect()
@@ -187,11 +191,12 @@ impl DocView {
         area: Rect,
         vp: &Viewport,
         scale: ScaleKey,
+        recolor: Option<Recolor>,
         page_color: Color32,
     ) {
         let ppp = painter.ctx().pixels_per_point();
         let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-        let visible = tiles::visible_tiles(&self.layout, vp, scale);
+        let visible = tiles::visible_tiles(&self.layout, vp, scale, recolor);
 
         for page in self.layout.pages_in(vp.y, vp.y + vp.doc_height()) {
             let r = self.layout.page(page);
@@ -208,12 +213,12 @@ impl DocView {
             // Until all sharp tiles are in, draw the nearest other scale
             // stretched underneath.
             let mut drew_any = false;
-            if !complete && let Some(other) = self.fallback_scale(page, scale) {
+            if !complete && let Some((other, other_rc)) = self.fallback(page, scale, recolor) {
                 let ratio = vp.zoom / other.scale();
                 let keys: Vec<RenderJob> = self
                     .textures
                     .keys()
-                    .filter(|k| k.page == page && k.scale == other)
+                    .filter(|k| k.page == page && k.scale == other && k.recolor == other_rc)
                     .copied()
                     .collect();
                 for key in keys {
@@ -256,13 +261,19 @@ impl DocView {
         }
     }
 
-    /// The cached scale of `page` closest to `scale`, other than `scale`.
-    fn fallback_scale(&self, page: usize, scale: ScaleKey) -> Option<ScaleKey> {
+    /// The cached render of `page` to draw stretched while the sharp tiles
+    /// are missing: same colours if possible, then the closest scale.
+    fn fallback(
+        &self,
+        page: usize,
+        scale: ScaleKey,
+        recolor: Option<Recolor>,
+    ) -> Option<(ScaleKey, Option<Recolor>)> {
         self.textures
             .keys()
-            .filter(|k| k.page == page && k.scale != scale)
-            .map(|k| k.scale)
-            .min_by_key(|s| s.distance(scale))
+            .filter(|k| k.page == page && (k.scale, k.recolor) != (scale, recolor))
+            .map(|k| (k.scale, k.recolor))
+            .min_by_key(|(s, rc)| (*rc != recolor, s.distance(scale)))
     }
 }
 

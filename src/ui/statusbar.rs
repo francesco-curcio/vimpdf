@@ -39,7 +39,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, s: &Status) -> Option<Command> {
     // pushing the page number off screen.
     bar.label(text(&format!("{:.0}%", s.zoom_percent)));
     let page = bar
-        .add(Label::new(text(&format!("{}/{}", s.page, s.pages))).sense(Sense::click()))
+        .add(Label::new(text(&format!("{}/{}", s.page, s.pages))).sense(Sense::CLICK))
         .on_hover_cursor(CursorIcon::PointingHand)
         .on_hover_text("Go to page (:)");
     if page.clicked() {

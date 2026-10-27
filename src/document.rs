@@ -72,9 +72,9 @@ fn page_sizes(doc: &Document, count: i32) -> Result<Vec<PageSize>> {
         .collect()
 }
 
-/// Links of every page, in page-relative coordinates. Pages whose links
-/// cannot be read get an empty list.
-pub fn load_all_links(path: &Path) -> Result<Vec<Vec<PageLink>>> {
+/// Links of every page (page-relative coordinates; pages whose links cannot
+/// be read get an empty list) and the outline, flattened.
+pub fn load_links_and_outline(path: &Path) -> Result<(Vec<Vec<PageLink>>, Vec<OutlineItem>)> {
     let doc = open(path)?;
     let count = doc.page_count()?;
     let sizes = page_sizes(&doc, count)?;
@@ -86,34 +86,70 @@ pub fn load_all_links(path: &Path) -> Result<Vec<Vec<PageLink>>> {
             })
         })
         .collect();
-    Ok(links)
+    let mut outline = Vec::new();
+    match doc.outlines() {
+        Ok(items) => flatten_outline(&items, 0, &sizes, &mut outline),
+        Err(err) => tracing::warn!("cannot read the outline: {err:#}"),
+    }
+    Ok((links, outline))
+}
+
+/// One entry of the table of contents.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutlineItem {
+    pub title: String,
+    pub depth: usize,
+    pub target: Option<LinkTarget>,
+}
+
+fn flatten_outline(
+    items: &[mupdf::Outline],
+    depth: usize,
+    sizes: &[PageSize],
+    out: &mut Vec<OutlineItem>,
+) {
+    for item in items {
+        let target = match (&item.dest, &item.uri) {
+            (Some(dest), _) => dest_target(dest, sizes),
+            (None, Some(uri)) if !uri.is_empty() => Some(LinkTarget::External(uri.clone())),
+            _ => None,
+        };
+        out.push(OutlineItem {
+            title: item.title.trim().to_owned(),
+            depth,
+            target,
+        });
+        flatten_outline(&item.down, depth + 1, sizes, out);
+    }
+}
+
+/// An internal destination in page-relative coordinates.
+fn dest_target(dest: &mupdf::link::LinkDestination, sizes: &[PageSize]) -> Option<LinkTarget> {
+    let page = dest.loc.page_number as usize;
+    let origin = sizes.get(page)?;
+    let (x, y) = match dest.kind {
+        DestinationKind::XYZ { left, top, .. } => (left, top),
+        DestinationKind::FitH { top } | DestinationKind::FitBH { top } => (None, top),
+        DestinationKind::FitV { left } | DestinationKind::FitBV { left } => (left, None),
+        DestinationKind::FitR { left, top, .. } => (Some(left), Some(top)),
+        DestinationKind::Fit | DestinationKind::FitB => (None, None),
+    };
+    Some(LinkTarget::Internal {
+        page,
+        x: x.map(|x| x - origin.origin_x),
+        y: y.map(|y| y - origin.origin_y),
+    })
 }
 
 fn page_links(doc: &Document, page: i32, sizes: &[PageSize]) -> Result<Vec<PageLink>> {
     let size = sizes[page as usize];
     let mut out = Vec::new();
     for link in doc.load_page(page)?.links()? {
-        let target = match link.dest {
-            Some(dest) => {
-                let page = dest.loc.page_number as usize;
-                let Some(origin) = sizes.get(page) else {
-                    continue;
-                };
-                let (x, y) = match dest.kind {
-                    DestinationKind::XYZ { left, top, .. } => (left, top),
-                    DestinationKind::FitH { top } | DestinationKind::FitBH { top } => (None, top),
-                    DestinationKind::FitV { left } | DestinationKind::FitBV { left } => {
-                        (left, None)
-                    }
-                    DestinationKind::FitR { left, top, .. } => (Some(left), Some(top)),
-                    DestinationKind::Fit | DestinationKind::FitB => (None, None),
-                };
-                LinkTarget::Internal {
-                    page,
-                    x: x.map(|x| x - origin.origin_x),
-                    y: y.map(|y| y - origin.origin_y),
-                }
-            }
+        let target = match &link.dest {
+            Some(dest) => match dest_target(dest, sizes) {
+                Some(t) => t,
+                None => continue,
+            },
             None if !link.uri.is_empty() => LinkTarget::External(link.uri.clone()),
             None => continue,
         };
@@ -347,8 +383,12 @@ mod tests {
             );
         }
 
-        let links = load_all_links(path).unwrap();
+        let (links, outline) = load_links_and_outline(path).unwrap();
         assert_eq!(links.len(), info.page_count());
+        if std::env::var("PDFV_EXPECT_OUTLINE").is_ok() {
+            assert!(!outline.is_empty(), "no outline");
+            assert!(outline.iter().all(|i| !i.title.is_empty()));
+        }
 
         // Text extraction finds words on the first page, inside the page.
         let doc = open(path).unwrap();

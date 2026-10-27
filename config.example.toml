@@ -8,6 +8,8 @@ font_size = 14
 statusbar = true
 toolbar = false
 start_maximised = true
+recolor = false       # start in recolor (dark) mode; <C-r> toggles
+auto_reload = true    # reload when the file changes (e.g. LaTeX)
 
 [colors]
 page_background = "#ffffff"

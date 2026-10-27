@@ -12,6 +12,7 @@ crossbeam-channel = "0.5"
 directories = "6.0.0"
 eframe = "0.37.0"
 mupdf = "0.8.0"
+notify = "8"
 toml = "1.1.8"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

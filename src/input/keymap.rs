@@ -219,6 +219,8 @@ impl Keymap {
             ("<C-t>", ToggleToolbar),
             ("?", ToggleHelp),
             ("<C-F>", ToggleFullscreen),
+            ("<C-r>", ToggleRecolor),
+            ("<Tab>", ToggleOutline),
             ("r", Reload),
             ("<Esc>", Cancel),
             ("q", Quit),

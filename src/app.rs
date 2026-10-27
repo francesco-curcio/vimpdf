@@ -21,10 +21,12 @@ use crate::view::DocView;
 use crate::viewport::{FitMode, Viewport};
 
 mod hints;
+mod reading;
 mod searching;
 mod visual;
 
 use hints::HintState;
+use reading::{OutlineState, Persistence};
 use visual::{ContextMenu, Drag};
 
 const BACKGROUND: Color32 = Color32::from_gray(40);
@@ -71,6 +73,8 @@ pub struct PdfvApp {
     prompt_return: Mode,
     drag: Option<Drag>,
     menu: Option<ContextMenu>,
+    outline: OutlineState,
+    persist: Persistence,
 }
 
 impl PdfvApp {
@@ -116,8 +120,11 @@ impl PdfvApp {
             prompt_return: Mode::Normal,
             drag: None,
             menu: None,
+            outline: OutlineState::default(),
+            persist: Persistence::default(),
         };
         app.install_font(ctx, &mut warnings);
+        app.watch_file(ctx);
         app.report_warnings(warnings);
         app
     }
@@ -197,6 +204,10 @@ impl PdfvApp {
             Ok(v) => v,
             Err(e) => return self.error(format!("{e:#}")),
         };
+        let same_file = view.path == self.view.path;
+        if !same_file {
+            self.save_state();
+        }
 
         let position = self.viewport.as_ref().map(|vp| {
             let layout = &self.view.layout;
@@ -205,6 +216,14 @@ impl PdfvApp {
         });
         self.view = view;
         self.pending_scroll = Vec2::ZERO;
+        self.selection = None;
+        self.hints = None;
+        if matches!(self.mode, Mode::Visual | Mode::Hints | Mode::Outline) {
+            self.mode = Mode::Normal;
+        }
+        if !same_file {
+            self.watch_file(ctx);
+        }
         let name = self.view.file_name();
         ctx.send_viewport_cmd(ViewportCommand::Title(name.clone()));
 
@@ -410,6 +429,12 @@ impl PdfvApp {
             Command::ToggleStatusbar => self.config.statusbar = !self.config.statusbar,
             Command::ToggleToolbar => self.config.toolbar = !self.config.toolbar,
             Command::ToggleHelp => self.show_help = !self.show_help,
+            Command::ToggleRecolor => {
+                self.config.recolor = !self.config.recolor;
+                let state = if self.config.recolor { "on" } else { "off" };
+                self.info(format!("Recolor {state}"));
+            }
+            Command::ToggleOutline => self.toggle_outline(),
             Command::ToggleFullscreen => {
                 let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
                 ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!full));
@@ -494,6 +519,12 @@ impl PdfvApp {
 
     /// Key presses → commands, according to the mode.
     fn keyboard_commands(&mut self, ctx: &egui::Context) -> Vec<Command> {
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let toks = key_tokens(&ctx.input(|i| i.events.clone()));
+            if !toks.is_empty() {
+                tracing::trace!(?toks, mode = ?self.mode, "keys");
+            }
+        }
         // A focused text field (command line, toolbar page box) gets the keys.
         if self.mode == Mode::Hints {
             let events = ctx.input(|i| i.events.clone());
@@ -502,8 +533,15 @@ impl PdfvApp {
                 .filter_map(|tok| self.hint_key(ctx, tok))
                 .collect();
         }
+        if self.mode == Mode::Outline {
+            let events = ctx.input(|i| i.events.clone());
+            return key_tokens(&events)
+                .iter()
+                .filter_map(|tok| self.outline_key(tok))
+                .collect();
+        }
         let visual = self.mode == Mode::Visual;
-        if !(self.mode == Mode::Normal || visual) || ctx.egui_wants_keyboard_input() {
+        if !(self.mode == Mode::Normal || visual) || ctx.text_edit_focused() {
             return Vec::new();
         }
         let events = ctx.input(|i| i.events.clone());
@@ -583,6 +621,14 @@ impl eframe::App for PdfvApp {
             ctx.send_viewport_cmd(ViewportCommand::Focus);
             self.first_frame = false;
         }
+        // pdfv handles the keyboard itself: egui's Tab focus navigation must
+        // not leave a button focused, or Enter/Space would "click" it. Only
+        // text fields (command line, toolbar page box) keep focus.
+        if !ctx.text_edit_focused()
+            && let Some(id) = ctx.memory(|m| m.focused())
+        {
+            ctx.memory_mut(|m| m.surrender_focus(id));
+        }
 
         // Split the window: toolbar, pages, status bar / command line.
         let font_size = self.config.font_size;
@@ -601,7 +647,9 @@ impl eframe::App for PdfvApp {
 
         if self.viewport.is_none() {
             self.viewport = Some(self.new_viewport(area));
+            self.restore_state();
         }
+        self.check_reload(&ctx);
         if let Some(vp) = self.viewport.as_mut()
             && (vp.width, vp.height) != (area.width(), area.height())
         {
@@ -675,11 +723,14 @@ impl eframe::App for PdfvApp {
         self.view.receive_results(&ctx);
         self.view.request_text(&vp);
         let scale = ScaleKey::from_scale(vp.zoom * ctx.pixels_per_point());
-        self.view.schedule(&ctx, &vp, scale, self.scrolling_up);
+        let recolor = self.recolor();
+        self.view
+            .schedule(&ctx, &vp, scale, recolor, self.scrolling_up);
         let painter = ui.painter().with_clip_rect(area);
         painter.rect_filled(area, 0.0, BACKGROUND);
-        let page_color = color32(self.config.colors.page_background);
-        self.view.draw(&painter, area, &vp, scale, page_color);
+        let page_color = self.page_color();
+        self.view
+            .draw(&painter, area, &vp, scale, recolor, page_color);
         self.draw_search_highlights(&painter, area, &vp);
         self.draw_selection(&painter, area, &vp);
         self.draw_hints(&painter, area, &vp);
@@ -723,7 +774,7 @@ impl eframe::App for PdfvApp {
                     ui_commands.push(Command::Search(line));
                 }
             },
-            (Some(rect), Mode::Normal | Mode::Hints | Mode::Visual) => {
+            (Some(rect), Mode::Normal | Mode::Hints | Mode::Visual | Mode::Outline) => {
                 let file = self.view.file_name();
                 let linewise = self.selection.is_some_and(|s| s.linewise);
                 let status = statusbar::Status {
@@ -772,6 +823,25 @@ impl eframe::App for PdfvApp {
         if let Some(cmd) = self.context_menu(&ctx) {
             ui_commands.push(cmd);
         }
+        if self.mode == Mode::Outline {
+            let clicked = ui::outline::show(
+                &ctx,
+                area,
+                &self.view.outline,
+                self.outline.selected,
+                self.outline.follow,
+                font_size,
+            );
+            self.outline.follow = false;
+            if let Some(i) = clicked {
+                // Clicking jumps but keeps the panel open, to browse.
+                self.outline.selected = i;
+                if let Some(target) = self.view.outline[i].target.clone() {
+                    ui_commands.push(Command::FollowLink(target));
+                }
+            }
+        }
+        self.save_state_periodically();
 
         if !ui_commands.is_empty() {
             for cmd in ui_commands {
@@ -780,5 +850,9 @@ impl eframe::App for PdfvApp {
             ctx.request_repaint();
         }
         ctx.set_cursor_icon(cursor);
+    }
+
+    fn on_exit(&mut self) {
+        self.save_state();
     }
 }

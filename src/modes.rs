@@ -10,6 +10,8 @@ pub enum Mode {
     Hints,
     /// Selecting text (`v` / `V`, or a mouse selection).
     Visual,
+    /// The table of contents panel has the keyboard.
+    Outline,
 }
 
 impl Mode {
@@ -20,6 +22,7 @@ impl Mode {
             Mode::Search => "SEARCH",
             Mode::Hints => "HINTS",
             Mode::Visual => "VISUAL",
+            Mode::Outline => "OUTLINE",
         }
     }
 }

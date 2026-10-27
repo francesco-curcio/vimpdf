@@ -63,6 +63,10 @@ pub struct Config {
     pub statusbar: bool,
     pub toolbar: bool,
     pub start_maximised: bool,
+    /// Start in recolor (dark) mode.
+    pub recolor: bool,
+    /// Reload the document when the file changes on disk.
+    pub auto_reload: bool,
     pub colors: Colors,
     pub scroll_step: f32,
     pub smooth_scroll: bool,
@@ -86,6 +90,8 @@ impl Default for Config {
             statusbar: true,
             toolbar: false,
             start_maximised: true,
+            recolor: false,
+            auto_reload: true,
             colors: Colors {
                 page_background: c("#ffffff"),
                 recolor_dark: c("#1e1e1e"),
@@ -116,6 +122,8 @@ pub const OPTIONS: &[&str] = &[
     "ui.statusbar",
     "ui.toolbar",
     "ui.start_maximised",
+    "ui.recolor",
+    "ui.auto_reload",
     "colors.page_background",
     "colors.recolor_dark",
     "colors.recolor_light",
@@ -261,6 +269,8 @@ impl Config {
             "ui.statusbar" => self.statusbar = as_bool(v)?,
             "ui.toolbar" => self.toolbar = as_bool(v)?,
             "ui.start_maximised" => self.start_maximised = as_bool(v)?,
+            "ui.recolor" => self.recolor = as_bool(v)?,
+            "ui.auto_reload" => self.auto_reload = as_bool(v)?,
             "colors.page_background" => self.colors.page_background = as_color(v)?,
             "colors.recolor_dark" => self.colors.recolor_dark = as_color(v)?,
             "colors.recolor_light" => self.colors.recolor_light = as_color(v)?,

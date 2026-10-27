@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-use crate::document;
+use crate::document::{self, OutlineItem};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LinkTarget {
@@ -34,26 +34,26 @@ impl PageLink {
     }
 }
 
-/// Load every page's links on a background thread. The receiver yields one
-/// `Vec` per page, indexed by page number, once all pages are done.
-pub fn spawn_loader(
-    path: PathBuf,
-    wake: impl Fn() + Send + 'static,
-) -> Receiver<Vec<Vec<PageLink>>> {
+/// Links (one `Vec` per page) and the flattened outline.
+pub type Navigation = (Vec<Vec<PageLink>>, Vec<OutlineItem>);
+
+/// Load every page's links and the outline on a background thread.
+pub fn spawn_loader(path: PathBuf, wake: impl Fn() + Send + 'static) -> Receiver<Navigation> {
     let (tx, rx) = mpsc::channel();
     thread::Builder::new()
         .name("pdfv-links".into())
         .spawn(move || {
             let start = std::time::Instant::now();
-            match document::load_all_links(&path) {
-                Ok(links) => {
-                    let total: usize = links.iter().map(Vec::len).sum();
+            match document::load_links_and_outline(&path) {
+                Ok(nav) => {
+                    let total: usize = nav.0.iter().map(Vec::len).sum();
                     tracing::debug!(
-                        total,
+                        links = total,
+                        outline = nav.1.len(),
                         ms = start.elapsed().as_millis() as u64,
-                        "loaded links"
+                        "loaded links and outline"
                     );
-                    if tx.send(links).is_ok() {
+                    if tx.send(nav).is_ok() {
                         wake();
                     }
                 }
