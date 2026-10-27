@@ -1,9 +1,13 @@
 mod app;
+mod config;
 mod document;
 mod input;
 mod layout;
 mod links;
+mod modes;
 mod render;
+mod ui;
+mod view;
 mod viewport;
 
 use std::path::PathBuf;
@@ -14,6 +18,7 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use crate::app::PdfvApp;
+use crate::config::Config;
 use crate::document::DocInfo;
 
 /// A keyboard-driven, vim-style PDF viewer.
@@ -22,6 +27,10 @@ use crate::document::DocInfo;
 struct Args {
     /// PDF file to open.
     file: PathBuf,
+
+    /// Config file to use instead of ~/.config/pdfv/config.toml.
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -49,7 +58,12 @@ fn run(args: Args) -> Result<()> {
     }
 
     let info = DocInfo::load(&path)?;
-    tracing::info!(path = %path.display(), pages = info.page_count(), "opened document");
+
+    let config_path = args.config.or_else(Config::default_path);
+    let (config, warnings) = match &config_path {
+        Some(p) => Config::load(p),
+        None => (Config::default(), Vec::new()),
+    };
 
     let title = path
         .file_name()
@@ -60,6 +74,7 @@ fn run(args: Args) -> Result<()> {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title(&title)
             .with_inner_size([900.0, 1100.0])
+            .with_maximized(config.start_maximised)
             .with_active(true),
         ..Default::default()
     };
@@ -67,7 +82,16 @@ fn run(args: Args) -> Result<()> {
     eframe::run_native(
         "pdfv",
         options,
-        Box::new(move |cc| Ok(Box::new(PdfvApp::new(cc, path, info)))),
+        Box::new(move |cc| {
+            Ok(Box::new(PdfvApp::new(
+                cc,
+                path,
+                info,
+                config,
+                config_path,
+                warnings,
+            )))
+        }),
     )
     .map_err(|e| anyhow::anyhow!("failed to start window: {e}"))
 }

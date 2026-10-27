@@ -1,0 +1,39 @@
+# Example pdfv config. Copy to ~/.config/pdfv/config.toml and edit.
+# Every option is optional; these are the defaults unless noted.
+# Full reference: docs/configuration.md
+
+[ui]
+font_family = "Menlo"
+font_size = 14
+statusbar = true
+toolbar = false
+start_maximised = true
+
+[colors]
+page_background = "#ffffff"
+recolor_dark = "#1e1e1e"
+recolor_light = "#d4d4d4"
+search_highlight = "#f9e2af80"
+selection = "#89b4fa60"
+caret = "#f38ba8"
+hint_background = "#fab387"
+
+[scroll]
+step = 60        # screen points per j/k
+smooth = true
+
+[zoom]
+step = 1.1
+default_fit = "width"   # "width" | "page" | "none"
+
+[mouse]
+zoom_modifier = "cmd"   # "cmd" | "ctrl" | "alt" | "shift"; pinch always zooms
+drag = "select"         # "select" | "pan"
+pan_modifier = "alt"
+copy_on_select = false
+
+[keys.normal]
+# Examples (not defaults):
+# "x" = "scroll_down 3"
+# "<C-F>" = "toggle_fullscreen"
+# "q" = ""              # unbind

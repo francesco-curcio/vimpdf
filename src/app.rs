@@ -1,116 +1,284 @@
-use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{
-    self, Align2, Color32, FontId, Pos2, Rect, TextureHandle, TextureOptions, Vec2,
-};
+use eframe::egui::{self, Align2, Color32, FontId, Rect, Vec2, ViewportCommand};
 
+use crate::config::{Color, Config};
 use crate::document::DocInfo;
-use crate::input::command::Command;
+use crate::input::command::{Command, parse_ex};
 use crate::input::keymap::{KeyState, Keymap};
 use crate::input::{key_tokens, mouse};
-use crate::layout::Layout;
-use crate::links::{self, LinkTarget, PageLink};
-use crate::render::cache::LruCache;
-use crate::render::tiles;
-use crate::render::{RenderJob, Renderer, ScaleKey};
-use crate::viewport::Viewport;
+use crate::links::{self, LinkTarget};
+use crate::modes::Mode;
+use crate::render::ScaleKey;
+use crate::ui::cmdline::{CmdLine, Outcome, TypeAhead, type_ahead};
+use crate::ui::toolbar::{self, Toolbar};
+use crate::ui::{self, fonts, help, statusbar};
+use crate::view::DocView;
+use crate::viewport::{FitMode, Viewport};
 
 const BACKGROUND: Color32 = Color32::from_gray(40);
-const PLACEHOLDER_TEXT: Color32 = Color32::from_gray(160);
-/// Space left and right of pages in fit-width mode, in screen points.
+/// Space around pages in the fit modes, in screen points.
 const PAGE_MARGIN: f32 = 16.0;
-/// Space between pages, in PDF points.
-const PAGE_GAP: f32 = 8.0;
-/// Distance of one `j`/`k` step, in screen points.
-const SCROLL_STEP: f32 = 60.0;
-/// Zoom factor of one `+`/`-` step.
-const ZOOM_STEP: f32 = 1.1;
-/// After the zoom changes, wait this long for it to settle before rendering
-/// at the new scale (the old tiles are drawn scaled meanwhile).
-const RERENDER_DELAY: Duration = Duration::from_millis(150);
-const CACHE_BUDGET: usize = 512 * 1024 * 1024;
 const MESSAGE_DURATION: Duration = Duration::from_secs(4);
+/// Time constant of smooth keyboard scrolling.
+const SMOOTH_SCROLL_TAU: f32 = 0.05;
+
+struct Message {
+    text: String,
+    error: bool,
+    since: Instant,
+}
 
 pub struct PdfvApp {
-    layout: Layout,
+    view: DocView,
     viewport: Option<Viewport>,
-    renderer: Renderer,
-    textures: LruCache<RenderJob, TextureHandle>,
-    failed: HashSet<RenderJob>,
-    last_queue: Vec<RenderJob>,
-    /// Render scale of the previous frame and when it last changed.
-    scale: Option<(ScaleKey, Instant)>,
-    /// Direction of the last vertical movement, for prefetching.
-    scrolling_up: bool,
+    config: Config,
+    config_path: Option<PathBuf>,
+    installed_font: Option<String>,
     keymap: Keymap,
     keys: KeyState,
-    links: Vec<Vec<PageLink>>,
-    links_rx: Receiver<Vec<Vec<PageLink>>>,
-    message: Option<(String, Instant)>,
+    mode: Mode,
+    cmdline: CmdLine,
+    toolbar: Toolbar,
+    show_help: bool,
+    message: Option<Message>,
+    /// Keyboard scroll distance not yet applied (smooth scrolling).
+    pending_scroll: Vec2,
+    /// Direction of the last vertical movement, for prefetching.
+    scrolling_up: bool,
+    first_frame: bool,
 }
 
 impl PdfvApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, path: PathBuf, info: DocInfo) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        path: PathBuf,
+        info: DocInfo,
+        config: Config,
+        config_path: Option<PathBuf>,
+        mut warnings: Vec<String>,
+    ) -> Self {
+        let ctx = &cc.egui_ctx;
         // Cmd +/- would change egui's UI scale; zoom is ours to handle.
-        cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
 
-        let workers = thread_count();
-        tracing::debug!(workers, "starting render workers");
-        let ctx = cc.egui_ctx.clone();
-        let renderer = Renderer::spawn(path.clone(), workers, move || ctx.request_repaint());
-        let ctx = cc.egui_ctx.clone();
-        let links_rx = links::spawn_loader(path, move || ctx.request_repaint());
+        let (keymap, key_warnings) = config.normal_keymap();
+        warnings.extend(key_warnings);
 
-        Self {
-            layout: Layout::new(&info.page_sizes, PAGE_GAP),
+        let mut app = Self {
+            view: DocView::with_info(ctx, path, info),
             viewport: None,
-            renderer,
-            textures: LruCache::new(CACHE_BUDGET),
-            failed: HashSet::new(),
-            last_queue: Vec::new(),
-            scale: None,
-            scrolling_up: false,
-            keymap: Keymap::default_normal(),
+            config,
+            config_path,
+            installed_font: None,
+            keymap,
             keys: KeyState::default(),
-            links: vec![Vec::new(); info.page_count()],
-            links_rx,
+            mode: Mode::Normal,
+            cmdline: CmdLine::default(),
+            toolbar: Toolbar::default(),
+            show_help: false,
             message: None,
+            pending_scroll: Vec2::ZERO,
+            scrolling_up: false,
+            first_frame: true,
+        };
+        app.install_font(ctx, &mut warnings);
+        app.report_warnings(warnings);
+        app
+    }
+
+    fn info(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        tracing::debug!("{text}");
+        self.message = Some(Message {
+            text,
+            error: false,
+            since: Instant::now(),
+        });
+    }
+
+    fn error(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        tracing::warn!("{text}");
+        self.message = Some(Message {
+            text,
+            error: true,
+            since: Instant::now(),
+        });
+    }
+
+    fn report_warnings(&mut self, warnings: Vec<String>) {
+        for w in &warnings {
+            tracing::warn!("{w}");
+        }
+        match warnings.as_slice() {
+            [] => {}
+            [one] => self.error(one.clone()),
+            [first, rest @ ..] => {
+                self.error(format!("{first} (+{} more, see log)", rest.len()));
+            }
         }
     }
 
-    fn show_message(&mut self, msg: impl Into<String>) {
-        let msg = msg.into();
-        tracing::debug!("{msg}");
-        self.message = Some((msg, Instant::now()));
+    fn install_font(&mut self, ctx: &egui::Context, warnings: &mut Vec<String>) {
+        let family = self.config.font_family.clone();
+        if self.installed_font.as_ref() == Some(&family) {
+            return;
+        }
+        if let Err(e) = fonts::install(ctx, &family) {
+            warnings.push(format!("config: ui.font_family: {e}"));
+        }
+        self.installed_font = Some(family);
     }
 
-    fn execute(&mut self, cmd: Command, ctx: &egui::Context) {
+    fn new_viewport(&self, area: Rect) -> Viewport {
+        let layout = &self.view.layout;
+        let mut vp = Viewport::new(area.width(), area.height());
+        match self.config.default_fit {
+            FitMode::Width => vp.fit_width(layout, PAGE_MARGIN),
+            FitMode::Page => vp.fit_page(layout, PAGE_MARGIN),
+            FitMode::None => vp.zoom_to(1.0, 0.0, 0.0),
+        }
+        vp.y = 0.0;
+        if vp.fit == FitMode::Page {
+            vp.goto_page(layout, 0);
+        }
+        vp
+    }
+
+    /// Open a document. With `keep_position`, stay on the same page and
+    /// offset (reload); otherwise start at the top with the default fit.
+    fn open(&mut self, ctx: &egui::Context, path: PathBuf, keep_position: bool) {
+        let path = if path.is_relative() {
+            self.view
+                .path
+                .parent()
+                .map(|dir| dir.join(&path))
+                .unwrap_or(path)
+        } else {
+            path
+        };
+        let view = match DocView::open(ctx, &path) {
+            Ok(v) => v,
+            Err(e) => return self.error(format!("{e:#}")),
+        };
+
+        let position = self.viewport.as_ref().map(|vp| {
+            let layout = &self.view.layout;
+            let page = vp.current_page(layout);
+            (page, vp.y - layout.page(page).y)
+        });
+        self.view = view;
+        self.pending_scroll = Vec2::ZERO;
+        let name = self.view.file_name();
+        ctx.send_viewport_cmd(ViewportCommand::Title(name.clone()));
+
+        match (keep_position, position, self.viewport.as_mut()) {
+            (true, Some((page, offset)), Some(vp)) => {
+                let page = page.min(self.view.page_count() - 1);
+                vp.y = self.view.layout.page(page).y + offset;
+                self.info(format!("Reloaded {name}"));
+            }
+            _ => {
+                self.viewport = None;
+                self.info(format!("Opened {name}"));
+            }
+        }
+    }
+
+    fn source_config(&mut self, ctx: &egui::Context) {
+        let Some(path) = self.config_path.clone() else {
+            return self.error("no config file location (HOME not set?)");
+        };
+        let (config, mut warnings) = Config::load(&path);
+        let (keymap, key_warnings) = config.normal_keymap();
+        warnings.extend(key_warnings);
+        self.config = config;
+        self.keymap = keymap;
+        self.keys.reset();
+        self.install_font(ctx, &mut warnings);
+        if warnings.is_empty() {
+            self.info(format!("Sourced {}", path.display()));
+        } else {
+            self.report_warnings(warnings);
+        }
+    }
+
+    fn scroll(&mut self, dx: f32, dy: f32) {
+        if self.config.smooth_scroll {
+            self.pending_scroll += Vec2::new(dx, dy);
+        } else if let Some(vp) = self.viewport.as_mut() {
+            vp.scroll_by(dx, dy);
+        }
+    }
+
+    fn apply_smooth_scroll(&mut self, ctx: &egui::Context) {
+        if self.pending_scroll == Vec2::ZERO {
+            return;
+        }
         let Some(vp) = self.viewport.as_mut() else {
             return;
         };
-        let layout = &self.layout;
-        let screen = vp.height;
+        let dt = ctx.input(|i| i.stable_dt).clamp(0.001, 0.05);
+        let step = if self.pending_scroll.length() < 0.5 {
+            self.pending_scroll
+        } else {
+            self.pending_scroll * (1.0 - (-dt / SMOOTH_SCROLL_TAU).exp())
+        };
+        let before = (vp.x, vp.y);
+        vp.scroll_by(step.x, step.y);
+        vp.clamp(&self.view.layout);
+        self.pending_scroll -= step;
+        // Stop at the document edges instead of pushing forever.
+        if vp.x == before.0 {
+            self.pending_scroll.x = 0.0;
+        }
+        if vp.y == before.1 {
+            self.pending_scroll.y = 0.0;
+        }
+        ctx.request_repaint();
+    }
+
+    fn execute(&mut self, cmd: Command, ctx: &egui::Context) {
+        tracing::trace!(?cmd, "command");
+        let step = self.config.scroll_step;
+        let (screen, zoom_step) = match &self.viewport {
+            Some(vp) => (vp.height, self.config.zoom_step),
+            None => return,
+        };
+        match cmd {
+            Command::ScrollDown(n) => return self.scroll(0.0, n as f32 * step),
+            Command::ScrollUp(n) => return self.scroll(0.0, -(n as f32) * step),
+            Command::ScrollLeft(n) => return self.scroll(-(n as f32) * step, 0.0),
+            Command::ScrollRight(n) => return self.scroll(n as f32 * step, 0.0),
+            Command::HalfPageDown(n) => return self.scroll(0.0, n as f32 * screen / 2.0),
+            Command::HalfPageUp(n) => return self.scroll(0.0, -(n as f32) * screen / 2.0),
+            Command::ScreenDown(n) => return self.scroll(0.0, n as f32 * screen),
+            Command::ScreenUp(n) => return self.scroll(0.0, -(n as f32) * screen),
+            _ => {}
+        }
+
+        // Everything else moves instantly (or not at all).
+        self.pending_scroll = Vec2::ZERO;
+        let Some(vp) = self.viewport.as_mut() else {
+            return;
+        };
+        let layout = &self.view.layout;
         let (cx, cy) = (vp.width / 2.0, vp.height / 2.0);
         match cmd {
-            Command::ScrollDown(n) => vp.scroll_by(0.0, n as f32 * SCROLL_STEP),
-            Command::ScrollUp(n) => vp.scroll_by(0.0, -(n as f32) * SCROLL_STEP),
-            Command::ScrollLeft(n) => vp.scroll_by(-(n as f32) * SCROLL_STEP, 0.0),
-            Command::ScrollRight(n) => vp.scroll_by(n as f32 * SCROLL_STEP, 0.0),
             Command::ScrollBy { dx, dy } => vp.scroll_by(dx, dy),
-            Command::HalfPageDown(n) => vp.scroll_by(0.0, n as f32 * screen / 2.0),
-            Command::HalfPageUp(n) => vp.scroll_by(0.0, -(n as f32) * screen / 2.0),
-            Command::ScreenDown(n) => vp.scroll_by(0.0, n as f32 * screen),
-            Command::ScreenUp(n) => vp.scroll_by(0.0, -(n as f32) * screen),
             Command::NextPage(n) => vp.next_page(layout, n as usize),
             Command::PrevPage(n) => vp.prev_page(layout, n as usize),
-            Command::GotoFirst => vp.y = 0.0,
+            Command::GotoFirst => vp.goto_page(layout, 0),
             Command::GotoLast => vp.goto_end(layout),
-            Command::GotoPage(n) => vp.goto_page(layout, n.saturating_sub(1)),
-            Command::ZoomIn(n) => vp.zoom_by(ZOOM_STEP.powi(n as i32), cx, cy),
-            Command::ZoomOut(n) => vp.zoom_by(ZOOM_STEP.powi(-(n as i32)), cx, cy),
+            Command::GotoPage(0) => self.error("Pages start at 1"),
+            Command::GotoPage(n) if n > layout.len() => {
+                self.error(format!("No page {n} (last is {})", layout.len()));
+            }
+            Command::GotoPage(n) => vp.goto_page(layout, n - 1),
+            Command::ZoomIn(n) => vp.zoom_by(zoom_step.powi(n as i32), cx, cy),
+            Command::ZoomOut(n) => vp.zoom_by(zoom_step.powi(-(n as i32)), cx, cy),
             Command::ZoomReset => vp.zoom_to(1.0, cx, cy),
             Command::ZoomBy { factor, x, y } => vp.zoom_by(factor, x, y),
             Command::FitWidth => vp.fit_width(layout, PAGE_MARGIN),
@@ -120,238 +288,255 @@ impl PdfvApp {
                 vp.goto_page(layout, page);
             }
             Command::FollowLink(LinkTarget::External(uri)) => match links::open_external(&uri) {
-                Ok(()) => self.show_message(format!("Opening {uri}")),
-                Err(err) => self.show_message(err),
+                Ok(()) => self.info(format!("Opening {uri}")),
+                Err(err) => self.error(err),
             },
-            Command::Cancel => self.message = None,
-            Command::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-        }
-    }
-
-    fn receive_results(&mut self, ctx: &egui::Context) {
-        while let Some(result) = self.renderer.try_recv() {
-            let job = result.job;
-            match result.image {
-                Ok(image) => {
-                    let bytes = image.pixels.len() * 4;
-                    let name = format!("p{}-{}-{}", job.page, job.tile.col, job.tile.row);
-                    let tex = ctx.load_texture(name, image, TextureOptions::LINEAR);
-                    self.textures.insert(job, tex, bytes);
-                    tracing::trace!(
-                        textures = self.textures.len(),
-                        mb = self.textures.used_bytes() / (1024 * 1024),
-                        "texture cache"
-                    );
-                }
-                Err(err) => {
-                    tracing::error!(page = job.page, "render failed: {err}");
-                    self.failed.insert(job);
-                }
+            Command::EnterCommandLine(prefill) => {
+                self.keys.reset();
+                self.mode = Mode::Command;
+                self.cmdline.open(&prefill);
             }
-        }
-        if let Ok(links) = self.links_rx.try_recv() {
-            self.links = links;
-        }
-    }
-
-    /// Queue tiles to render, unless the zoom is still changing.
-    fn schedule(&mut self, ctx: &egui::Context, vp: &Viewport, scale: ScaleKey) {
-        let changed = match self.scale {
-            Some((prev, _)) if prev == scale => false,
-            _ => {
-                self.scale = Some((scale, Instant::now()));
-                true
+            Command::ToggleStatusbar => self.config.statusbar = !self.config.statusbar,
+            Command::ToggleToolbar => self.config.toolbar = !self.config.toolbar,
+            Command::ToggleHelp => self.show_help = !self.show_help,
+            Command::ToggleFullscreen => {
+                let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!full));
             }
-        };
-        let since = self.scale.map_or(Duration::MAX, |(_, t)| t.elapsed());
-        let first_render = self.textures.len() == 0;
-
-        let jobs: Vec<RenderJob> = if since < RERENDER_DELAY && !first_render {
-            if changed {
-                tracing::trace!(scale = scale.scale(), "waiting for zoom to settle");
-            }
-            ctx.request_repaint_after(RERENDER_DELAY - since);
-            Vec::new()
-        } else {
-            tiles::plan(&self.layout, vp, scale, self.scrolling_up)
-                .into_iter()
-                .filter(|j| !self.textures.contains(j) && !self.failed.contains(j))
-                .collect()
-        };
-        if jobs != self.last_queue {
-            self.renderer.set_queue(jobs.iter().copied());
-            self.last_queue = jobs;
-        }
-    }
-
-    fn draw_pages(&mut self, painter: &egui::Painter, area: Rect, vp: &Viewport, scale: ScaleKey) {
-        let ppp = painter.ctx().pixels_per_point();
-        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-        let visible = tiles::visible_tiles(&self.layout, vp, scale);
-
-        for page in self.layout.pages_in(vp.y, vp.y + vp.doc_height()) {
-            let r = self.layout.page(page);
-            let (vx, vy) = vp.to_view(r.x, r.y);
-            // Tiles are positioned from the page corner, which sits on the
-            // pixel grid so that 1:1 tiles are not resampled and don't seam.
-            let min = snap_to_pixels(area.min + Vec2::new(vx, vy), ppp);
-            let page_rect = Rect::from_min_size(min, Vec2::new(r.w, r.h) * vp.zoom);
-            painter.rect_filled(page_rect, 0.0, Color32::WHITE);
-
-            let wanted: Vec<&RenderJob> = visible.iter().filter(|j| j.page == page).collect();
-            let complete = wanted.iter().all(|j| self.textures.contains(j));
-
-            // Until all sharp tiles are in, draw the nearest other scale
-            // stretched underneath.
-            let mut drew_any = false;
-            if !complete && let Some(other) = self.fallback_scale(page, scale) {
-                let ratio = vp.zoom / other.scale();
-                let keys: Vec<RenderJob> = self
-                    .textures
-                    .keys()
-                    .filter(|k| k.page == page && k.scale == other)
-                    .copied()
-                    .collect();
-                for key in keys {
-                    let Some(tex) = self.textures.get(&key) else {
-                        continue;
-                    };
-                    let rect = Rect::from_min_size(
-                        min + Vec2::new(key.rect.x as f32, key.rect.y as f32) * ratio,
-                        Vec2::new(key.rect.w as f32, key.rect.h as f32) * ratio,
-                    );
-                    if rect.intersects(area) {
-                        painter.image(tex.id(), rect, uv, Color32::WHITE);
-                        drew_any = true;
+            Command::Reload => self.open(ctx, self.view.path.clone(), true),
+            Command::Open(path) => self.open(ctx, path, false),
+            Command::Set { option, value } => match self.config.set_from_str(&option, &value) {
+                Ok(key) => {
+                    let mut warnings = Vec::new();
+                    self.install_font(ctx, &mut warnings);
+                    if warnings.is_empty() {
+                        self.info(format!("{key} = {value}"));
+                    } else {
+                        self.report_warnings(warnings);
                     }
                 }
+                Err(e) => self.error(format!(":set {option}: {e}")),
+            },
+            Command::Source => self.source_config(ctx),
+            Command::Cancel => {
+                self.message = None;
+                self.show_help = false;
             }
-
-            for job in wanted {
-                let Some(tex) = self.textures.get(job) else {
-                    continue;
-                };
-                let rect = Rect::from_min_size(
-                    min + Vec2::new(job.rect.x as f32, job.rect.y as f32) / ppp,
-                    Vec2::new(job.rect.w as f32, job.rect.h as f32) / ppp,
-                );
-                painter.image(tex.id(), rect, uv, Color32::WHITE);
-                drew_any = true;
-            }
-
-            if !drew_any {
-                tracing::trace!(page, "drawing placeholder");
-                painter.text(
-                    page_rect.center(),
-                    Align2::CENTER_CENTER,
-                    (page + 1).to_string(),
-                    FontId::proportional(24.0),
-                    PLACEHOLDER_TEXT,
-                );
-            }
+            Command::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
+            Command::ScrollDown(_)
+            | Command::ScrollUp(_)
+            | Command::ScrollLeft(_)
+            | Command::ScrollRight(_)
+            | Command::HalfPageDown(_)
+            | Command::HalfPageUp(_)
+            | Command::ScreenDown(_)
+            | Command::ScreenUp(_) => unreachable!("handled above"),
         }
     }
 
-    /// The cached scale of `page` closest to `scale`, other than `scale`.
-    fn fallback_scale(&self, page: usize, scale: ScaleKey) -> Option<ScaleKey> {
-        self.textures
-            .keys()
-            .filter(|k| k.page == page && k.scale != scale)
-            .map(|k| k.scale)
-            .min_by_key(|s| s.distance(scale))
+    /// Key presses → commands, according to the mode.
+    fn keyboard_commands(&mut self, ctx: &egui::Context) -> Vec<Command> {
+        // A focused text field (command line, toolbar page box) gets the keys.
+        if self.mode != Mode::Normal || ctx.egui_wants_keyboard_input() {
+            return Vec::new();
+        }
+        let events = ctx.input(|i| i.events.clone());
+        let mut commands = Vec::new();
+        let mut tokens = key_tokens(&events).into_iter();
+        while let Some(tok) = tokens.next() {
+            if self.show_help {
+                if matches!(tok.as_str(), "<Esc>" | "?" | "q") {
+                    self.show_help = false;
+                }
+                continue;
+            }
+            let Some(cmd) = self.keys.feed(&tok, &self.keymap) else {
+                continue;
+            };
+            let Command::EnterCommandLine(prefill) = cmd else {
+                commands.push(cmd);
+                continue;
+            };
+            // Keys typed in the same frame as ':' belong to the command line.
+            match type_ahead(&mut tokens, prefill) {
+                TypeAhead::Editing(text) => {
+                    commands.push(Command::EnterCommandLine(text));
+                    break;
+                }
+                TypeAhead::Submitted(line) => {
+                    self.cmdline.push_history(&line);
+                    match parse_ex(&line) {
+                        Ok(Some(cmd)) => commands.push(cmd),
+                        Ok(None) => {}
+                        Err(e) => self.error(e),
+                    }
+                }
+                TypeAhead::Cancelled => {}
+            }
+        }
+        commands
     }
 }
 
-fn thread_count() -> usize {
-    let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
-    (cores / 2).clamp(2, 4)
-}
-
-/// Round a position to the nearest physical pixel.
-fn snap_to_pixels(pos: Pos2, ppp: f32) -> Pos2 {
-    Pos2::new((pos.x * ppp).round() / ppp, (pos.y * ppp).round() / ppp)
+fn color32(c: Color) -> Color32 {
+    let [r, g, b, a] = c.0;
+    Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 
 impl eframe::App for PdfvApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        let area = ui.max_rect();
+        if self.first_frame {
+            // Launched from a terminal, the window doesn't always get focus.
+            ctx.send_viewport_cmd(ViewportCommand::Focus);
+            self.first_frame = false;
+        }
 
-        let layout = &self.layout;
-        let vp = self.viewport.get_or_insert_with(|| {
-            let mut vp = Viewport::new(area.width(), area.height());
-            vp.fit_width(layout, PAGE_MARGIN);
-            vp
+        // Split the window: toolbar, pages, status bar / command line.
+        let font_size = self.config.font_size;
+        let mut area = ui.max_rect();
+        let toolbar_rect = self.config.toolbar.then(|| {
+            let h = toolbar::height(font_size);
+            let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
+            area.min.y += h;
+            r
         });
-        if (vp.width, vp.height) != (area.width(), area.height()) {
+        let bottom_rect = (self.config.statusbar || self.mode == Mode::Command).then(|| {
+            let h = ui::bar_height(font_size);
+            area.max.y -= h;
+            Rect::from_min_size(area.left_bottom(), Vec2::new(area.width(), h))
+        });
+
+        if self.viewport.is_none() {
+            self.viewport = Some(self.new_viewport(area));
+        }
+        if let Some(vp) = self.viewport.as_mut()
+            && (vp.width, vp.height) != (area.width(), area.height())
+        {
             vp.resize(area.width(), area.height());
-            vp.refit(layout, PAGE_MARGIN);
+            vp.refit(&self.view.layout, PAGE_MARGIN);
         }
 
         // Input → commands.
-        let events = ctx.input(|i| i.events.clone());
-        let mut commands: Vec<Command> = key_tokens(&events)
-            .iter()
-            .filter_map(|tok| self.keys.feed(tok, &self.keymap))
-            .collect();
-        let mouse = mouse::handle(&ctx, area, vp, &self.layout, &self.links);
-        commands.extend(mouse.commands);
+        let mut commands = self.keyboard_commands(&ctx);
+        let mut cursor = egui::CursorIcon::Default;
+        if !ctx.egui_wants_pointer_input()
+            && let Some(vp) = &self.viewport
+        {
+            let m = mouse::handle(
+                &ctx,
+                area,
+                vp,
+                &self.view.layout,
+                &self.view.links,
+                self.config.zoom_modifier,
+            );
+            commands.extend(m.commands);
+            cursor = m.cursor;
+        }
+        let Some(vp) = &self.viewport else { return };
         let (y_before, zoom_before) = (vp.y, vp.zoom);
         for cmd in commands {
-            tracing::trace!(?cmd, "command");
             self.execute(cmd, &ctx);
         }
+        self.apply_smooth_scroll(&ctx);
 
         let Some(vp) = self.viewport.as_mut() else {
+            // `:open` reset the viewport; lay out again next frame.
+            ctx.request_repaint();
             return;
         };
-        vp.clamp(&self.layout);
+        vp.clamp(&self.view.layout);
         if vp.y != y_before {
             self.scrolling_up = vp.y < y_before;
-            tracing::trace!(page = vp.current_page(&self.layout) + 1, y = vp.y, "moved");
+            tracing::trace!(page = vp.centre_page(&self.view.layout) + 1, "moved");
         }
         let vp = vp.clone();
-        if vp.zoom != zoom_before {
-            // Until the status bar exists (M3).
-            self.show_message(format!("Zoom {:.0}%", vp.zoom * 100.0));
+        if vp.zoom != zoom_before && !self.config.statusbar {
+            self.info(format!("Zoom {:.0}%", vp.zoom * 100.0));
         }
 
-        self.receive_results(&ctx);
+        // Pages.
+        self.view.receive_results(&ctx);
         let scale = ScaleKey::from_scale(vp.zoom * ctx.pixels_per_point());
-        self.schedule(&ctx, &vp, scale);
-
-        let painter = ui.painter().clone();
+        self.view.schedule(&ctx, &vp, scale, self.scrolling_up);
+        let painter = ui.painter().with_clip_rect(area);
         painter.rect_filled(area, 0.0, BACKGROUND);
-        self.draw_pages(&painter, area, &vp, scale);
+        let page_color = color32(self.config.colors.page_background);
+        self.view.draw(&painter, area, &vp, scale, page_color);
 
-        if let Some((msg, since)) = &self.message {
-            if since.elapsed() < MESSAGE_DURATION {
-                painter.text(
-                    area.left_bottom() + Vec2::new(8.0, -8.0),
-                    Align2::LEFT_BOTTOM,
-                    msg,
-                    FontId::proportional(14.0),
-                    Color32::LIGHT_GRAY,
-                );
-                ctx.request_repaint_after(MESSAGE_DURATION - since.elapsed());
-            } else {
-                self.message = None;
+        // Bars and overlays.
+        if self
+            .message
+            .as_ref()
+            .is_some_and(|m| m.since.elapsed() >= MESSAGE_DURATION)
+        {
+            self.message = None;
+        }
+        if let Some(m) = &self.message {
+            ctx.request_repaint_after(MESSAGE_DURATION.saturating_sub(m.since.elapsed()));
+        }
+
+        let page = vp.centre_page(&self.view.layout) + 1;
+        let pages = self.view.page_count();
+        let mut ui_commands = Vec::new();
+        if let Some(rect) = toolbar_rect {
+            ui_commands.extend(self.toolbar.show(ui, rect, page, pages, font_size));
+        }
+        match (bottom_rect, self.mode) {
+            (Some(rect), Mode::Command) => match self.cmdline.show(ui, rect, font_size) {
+                Outcome::Editing => {}
+                Outcome::Cancel => self.mode = Mode::Normal,
+                Outcome::Submit(line) => {
+                    self.mode = Mode::Normal;
+                    match parse_ex(&line) {
+                        Ok(Some(cmd)) => ui_commands.push(cmd),
+                        Ok(None) => {}
+                        Err(e) => self.error(e),
+                    }
+                }
+            },
+            (Some(rect), Mode::Normal) => {
+                let file = self.view.file_name();
+                let status = statusbar::Status {
+                    mode: self.mode.label(),
+                    file: &file,
+                    page,
+                    pages,
+                    zoom_percent: vp.zoom * 100.0,
+                    pending: self.keys.pending_display(),
+                    message: self.message.as_ref().map(|m| (m.text.as_str(), m.error)),
+                    font_size,
+                };
+                ui_commands.extend(statusbar::show(ui, rect, &status));
+            }
+            (None, _) => {
+                // No status bar: show messages over the page area.
+                if let Some(m) = &self.message {
+                    painter.text(
+                        area.left_bottom() + Vec2::new(8.0, -8.0),
+                        Align2::LEFT_BOTTOM,
+                        &m.text,
+                        FontId::monospace(font_size),
+                        if m.error {
+                            ui::ERROR
+                        } else {
+                            Color32::LIGHT_GRAY
+                        },
+                    );
+                }
             }
         }
+        if self.show_help {
+            help::show(&ctx, &self.keymap, &mut self.show_help, font_size);
+        }
 
-        ctx.set_cursor_icon(mouse.cursor);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn snap_to_pixels_aligns_on_retina() {
-        assert_eq!(
-            snap_to_pixels(Pos2::new(10.3, 5.8), 2.0),
-            Pos2::new(10.5, 6.0)
-        );
+        if !ui_commands.is_empty() {
+            for cmd in ui_commands {
+                self.execute(cmd, &ctx);
+            }
+            ctx.request_repaint();
+        }
+        ctx.set_cursor_icon(cursor);
     }
 }

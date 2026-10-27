@@ -1,8 +1,9 @@
 //! Mouse and trackpad input → `Command`s, plus hit-testing.
 
-use eframe::egui::{self, CursorIcon, Pos2, Rect};
+use eframe::egui::{self, CursorIcon, Event, Modifiers, MouseWheelUnit, Pos2, Rect};
 
 use super::command::Command;
+use crate::config::Modifier;
 use crate::layout::Layout;
 use crate::links::PageLink;
 use crate::viewport::Viewport;
@@ -19,12 +20,35 @@ pub fn handle(
     viewport: &Viewport,
     layout: &Layout,
     links: &[Vec<PageLink>],
+    zoom_modifier: Modifier,
 ) -> MouseOutput {
     let mut commands = Vec::new();
-    let (scroll, zoom, hover, clicked, click_pos) = ctx.input(|i| {
+    let (scroll, zoom, zoom_held, hover, clicked, click_pos) = ctx.input(|i| {
+        let mut zoom = 1.0;
+        for event in &i.events {
+            match event {
+                Event::Zoom(f) => zoom *= f,
+                Event::MouseWheel {
+                    unit,
+                    delta,
+                    modifiers,
+                    ..
+                } if held(*modifiers, zoom_modifier) => {
+                    let points = match unit {
+                        MouseWheelUnit::Point => delta.y,
+                        MouseWheelUnit::Line => delta.y * 40.0,
+                        MouseWheelUnit::Page => delta.y * view_rect.height(),
+                    };
+                    // Same feel as egui's own Ctrl+wheel zoom.
+                    zoom *= (points / 200.0).exp();
+                }
+                _ => {}
+            }
+        }
         (
             i.smooth_scroll_delta,
-            i.zoom_delta(),
+            zoom,
+            held(i.modifiers, zoom_modifier),
             i.pointer.hover_pos(),
             i.pointer.primary_clicked(),
             i.pointer.interact_pos(),
@@ -32,15 +56,15 @@ pub fn handle(
     });
 
     // egui reports how the content should move; scrolling moves the view the
-    // opposite way.
-    if scroll != egui::Vec2::ZERO {
+    // opposite way. While the zoom modifier is held the wheel zooms instead.
+    if scroll != egui::Vec2::ZERO && !zoom_held {
         commands.push(Command::ScrollBy {
             dx: -scroll.x,
             dy: -scroll.y,
         });
     }
 
-    // Pinch, or Cmd/Ctrl + wheel (egui turns those into zoom, not scroll).
+    // Pinch, or the zoom modifier + wheel.
     if zoom != 1.0 {
         let anchor = hover
             .filter(|p| view_rect.contains(*p))
@@ -68,6 +92,15 @@ pub fn handle(
         CursorIcon::Default
     };
     MouseOutput { commands, cursor }
+}
+
+fn held(m: Modifiers, modifier: Modifier) -> bool {
+    match modifier {
+        Modifier::Cmd => m.mac_cmd || (m.command && !cfg!(target_os = "macos")),
+        Modifier::Ctrl => m.ctrl,
+        Modifier::Alt => m.alt,
+        Modifier::Shift => m.shift,
+    }
 }
 
 /// The link under a point given in view coordinates.

@@ -116,12 +116,51 @@ enum Lookup<'a> {
 }
 
 impl Keymap {
+    /// Bind a built-in sequence (panics on invalid notation).
     pub fn bind(&mut self, seq: &str, cmd: Command) {
         let seq = parse_sequence(seq).expect("invalid built-in key sequence");
+        self.bind_parsed(seq, cmd);
+    }
+
+    pub fn bind_parsed(&mut self, seq: KeySeq, cmd: Command) {
         for i in 1..seq.len() {
             self.prefixes.insert(seq[..i].to_vec());
         }
         self.bindings.insert(seq, cmd);
+    }
+
+    pub fn unbind(&mut self, seq: &[String]) {
+        self.bindings.remove(seq);
+        self.prefixes = self
+            .bindings
+            .keys()
+            .flat_map(|s| (1..s.len()).map(|i| s[..i].to_vec()))
+            .collect();
+    }
+
+    #[cfg(test)]
+    pub fn get(&self, seq: &[String]) -> Option<&Command> {
+        self.bindings.get(seq)
+    }
+
+    /// All bindings, grouped by command in a stable order, for the help
+    /// overlay: (keys joined, command).
+    pub fn describe(&self) -> Vec<(String, Command)> {
+        let mut by_cmd: Vec<(String, Vec<String>, Command)> = Vec::new();
+        let mut seqs: Vec<(&KeySeq, &Command)> = self.bindings.iter().collect();
+        seqs.sort_by_key(|(seq, _)| (seq.concat().starts_with('<'), seq.concat()));
+        for (seq, cmd) in seqs {
+            let name = cmd.describe();
+            match by_cmd.iter_mut().find(|(n, _, _)| *n == name) {
+                Some((_, keys, _)) => keys.push(seq.concat()),
+                None => by_cmd.push((name, vec![seq.concat()], cmd.clone())),
+            }
+        }
+        by_cmd.sort_by(|a, b| a.0.cmp(&b.0));
+        by_cmd
+            .into_iter()
+            .map(|(_, keys, cmd)| (keys.join("  "), cmd))
+            .collect()
     }
 
     fn lookup(&self, seq: &[String]) -> Lookup<'_> {
@@ -166,6 +205,11 @@ impl Keymap {
             ("=", ZoomReset),
             ("s", FitWidth),
             ("a", FitPage),
+            (":", EnterCommandLine(String::new())),
+            ("<C-t>", ToggleToolbar),
+            ("?", ToggleHelp),
+            ("<C-F>", ToggleFullscreen),
+            ("r", Reload),
             ("<Esc>", Cancel),
             ("q", Quit),
         ] {
@@ -210,6 +254,12 @@ impl KeyState {
                 None
             }
         }
+    }
+
+    /// The count and keys typed so far, for the status bar ("12", "g").
+    pub fn pending_display(&self) -> String {
+        let count = self.count.get().map(|n| n.to_string()).unwrap_or_default();
+        count + &self.pending.concat()
     }
 
     pub fn is_pending(&self) -> bool {
@@ -273,6 +323,26 @@ mod tests {
             feed_all(&mut st, &km, &["3", "g", "g"]),
             vec![Command::GotoPage(3)]
         );
+    }
+
+    #[test]
+    fn unbinding_a_sequence_frees_its_prefix() {
+        let mut km = Keymap::default_normal();
+        km.unbind(&parse_sequence("gg").unwrap());
+        km.bind("g", Command::GotoLast);
+        let mut st = KeyState::default();
+        assert_eq!(feed_all(&mut st, &km, &["g"]), vec![Command::GotoLast]);
+    }
+
+    #[test]
+    fn describe_groups_keys_by_command() {
+        let km = Keymap::default_normal();
+        let entries = km.describe();
+        let (keys, _) = entries
+            .iter()
+            .find(|(_, c)| *c == Command::ScrollDown(1))
+            .unwrap();
+        assert_eq!(keys, "j  <Down>");
     }
 
     #[test]

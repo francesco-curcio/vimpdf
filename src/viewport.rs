@@ -133,9 +133,16 @@ impl Viewport {
         self.y += dy / self.zoom;
     }
 
-    /// The page at the top of the view.
+    /// The page at the top of the view. If the top edge is in the gap below
+    /// a page, the page after the gap.
     pub fn current_page(&self, layout: &Layout) -> usize {
-        layout.page_at_y(self.y + CURRENT_PAGE_SLACK / self.zoom)
+        let y = self.y + CURRENT_PAGE_SLACK / self.zoom;
+        let i = layout.page_at_y(y);
+        if y > layout.page(i).bottom() && i + 1 < layout.len() {
+            i + 1
+        } else {
+            i
+        }
     }
 
     /// The page at the vertical centre of the view.
@@ -143,21 +150,33 @@ impl Viewport {
         layout.page_at_y(self.y + self.doc_height() / 2.0)
     }
 
-    /// Scroll so the top of `page` is at the top of the view.
+    /// Scroll so the top of `page` is at the top of the view (in fit-page
+    /// mode: so the page is centred).
     pub fn goto_page(&mut self, layout: &Layout, page: usize) {
-        let page = page.min(layout.len().saturating_sub(1));
-        self.y = layout.page(page).y;
+        let r = layout.page(page.min(layout.len().saturating_sub(1)));
+        self.y = match self.fit {
+            FitMode::Page => r.y - (self.doc_height() - r.h) / 2.0,
+            _ => r.y,
+        };
     }
 
     /// Move `n` pages forward, snapping to the page top.
     pub fn next_page(&mut self, layout: &Layout, n: usize) {
-        let target = self.current_page(layout) + n;
-        self.goto_page(layout, target);
+        let current = match self.fit {
+            FitMode::Page => self.centre_page(layout),
+            _ => self.current_page(layout),
+        };
+        self.goto_page(layout, current + n);
     }
 
     /// Move `n` pages back, snapping to the page top. If the view is partway
     /// into the current page, the first step returns to its top.
     pub fn prev_page(&mut self, layout: &Layout, n: usize) {
+        if self.fit == FitMode::Page {
+            let current = self.centre_page(layout);
+            self.goto_page(layout, current.saturating_sub(n));
+            return;
+        }
         let current = self.current_page(layout);
         let at_top = self.y - layout.page(current).y <= CURRENT_PAGE_SLACK / self.zoom;
         let steps = if at_top { n } else { n - 1 };
@@ -263,6 +282,12 @@ mod tests {
         v.refit(&l, 10.0);
         v.refit(&l, 10.0);
         assert_eq!(v.centre_page(&l), 2);
+
+        // Page motions keep pages centred.
+        v.next_page(&l, 1);
+        assert_eq!(v.centre_page(&l), 3);
+        v.prev_page(&l, 2);
+        assert_eq!(v.centre_page(&l), 1);
     }
 
     #[test]
@@ -277,6 +302,14 @@ mod tests {
         v.resize(520.0, 400.0);
         v.refit(&l, 10.0);
         assert_eq!(v.zoom, 3.0, "free zoom survives a resize");
+    }
+
+    #[test]
+    fn view_top_in_a_gap_belongs_to_the_next_page() {
+        let l = layout();
+        let mut v = view();
+        v.y = l.page(1).bottom() + 5.0;
+        assert_eq!(v.current_page(&l), 2);
     }
 
     #[test]
