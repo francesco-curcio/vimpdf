@@ -229,6 +229,7 @@ impl Keymap {
             ("gv", WordHints),
             ("u", Undo),
             ("<C-a>", ToggleAnnotations),
+            ("X", RedactArea),
         ] {
             k.bind(seq, cmd);
         }
@@ -260,6 +261,7 @@ impl Keymap {
             ("o", SwapEnds),
             ("a", AwaitHighlight),
             ("c", Comment),
+            ("x", RedactSelection),
             ("u", Undo),
             ("v", Visual { linewise: false }),
             ("V", Visual { linewise: true }),

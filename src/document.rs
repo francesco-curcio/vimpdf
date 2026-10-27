@@ -405,6 +405,19 @@ mod tests {
         }
 
         if let Ok(out) = std::env::var("PDFV_DUMP") {
+            // PDFV_DUMP_PAGE picks another page (0-based) for the dump.
+            let n: usize = std::env::var("PDFV_DUMP_PAGE")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(0);
+            let size = info.page_sizes[n];
+            let (w, h) = (
+                (size.width * scale).ceil() as u32,
+                (size.height * scale).ceil() as u32,
+            );
+            let page = renderer
+                .render(n, scale, PixelRect { x: 0, y: 0, w, h })
+                .unwrap();
             let mut ppm = format!("P6\n{} {}\n255\n", page.width, page.height).into_bytes();
             ppm.extend_from_slice(&page.rgb);
             std::fs::write(out, ppm).unwrap();

@@ -132,6 +132,9 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `toggle_annotations` | `<C-a>` |
 | `undo` | `u` (normal and visual mode) |
 | `write [path]` | — (`:w`, `:w <path>`) |
+| `redact_area` | `X` |
+| `redact_matches` | — (`:redact-matches`) |
+| `apply_redactions [path]` | — (`:redact`, `:redact <path>`) |
 | `word_hints` | `gv` |
 | `jump_back [n]`, `jump_forward [n]` | `<C-o>`, `<C-i>` |
 | `set_mark [letter]`, `goto_mark [letter]` | `m`, `'` and `` ` `` (without a letter they wait for the next key) |
@@ -159,5 +162,6 @@ Visual mode only:
 | `yank` | `y`, `Cmd+C` |
 | `search_selection` | `*` |
 | `highlight [letter]` | `a` (without a letter it waits for one; `a` = last colour) |
+| `redact` | `x` (mark the selection for redaction) |
 | `comment` | `c` |
 | also: `half_page_down/up`, `screen_down/up`, `search_prompt`, `search_next/prev`, `command_line`, `toggle_help`, `cancel` | `<C-d>` `<C-u>` `<C-f>` `<C-b>` `/` `n` `N` `:` `?` `<Esc>` |

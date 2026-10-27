@@ -101,6 +101,14 @@ pub enum Command {
     ForceQuit,
     /// Reload, discarding unsaved annotations.
     Revert,
+    /// Mark the selection for redaction (`x` in visual mode).
+    RedactSelection,
+    /// Mark a rectangular area for redaction (`X`).
+    RedactArea,
+    /// Mark every match of the current search for redaction.
+    RedactMatches,
+    /// Apply all redaction marks, writing a new file.
+    ApplyRedactions(Option<PathBuf>),
     /// Open the `:` command line, optionally prefilled.
     EnterCommandLine(String),
     /// Open the `/` search line, optionally prefilled.
@@ -174,6 +182,10 @@ const SIMPLE: &[(&str, Command)] = &[
     ("undo", Command::Undo),
     ("toggle_annotations", Command::ToggleAnnotations),
     ("write", Command::Write(None)),
+    ("redact", Command::RedactSelection),
+    ("redact_area", Command::RedactArea),
+    ("redact_matches", Command::RedactMatches),
+    ("apply_redactions", Command::ApplyRedactions(None)),
     ("set_mark", Command::AwaitMark { set: true }),
     ("goto_mark", Command::AwaitMark { set: false }),
     ("toggle_statusbar", Command::ToggleStatusbar),
@@ -256,6 +268,9 @@ impl Command {
                 return mark_letter(a).map(|c| Command::Highlight((c != 'a').then_some(c)));
             }
             ("write", Some(a)) => return Ok(Command::Write(Some(expand_tilde(a)))),
+            ("apply_redactions", Some(a)) => {
+                return Ok(Command::ApplyRedactions(Some(expand_tilde(a))));
+            }
             ("set_mark", Some(a)) => return mark_letter(a).map(Command::SetMark),
             ("goto_mark", Some(a)) => return mark_letter(a).map(Command::GotoMark),
             _ => {}
@@ -347,6 +362,9 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
         "wq" | "x" | "xit" => Command::WriteQuit,
         "e!" | "edit!" if rest.is_empty() => Command::Revert,
         "annotations" | "ann" => Command::ToggleAnnotations,
+        "redact" if rest.is_empty() => Command::ApplyRedactions(None),
+        "redact" => Command::ApplyRedactions(Some(expand_tilde(rest))),
+        "redact-matches" => Command::RedactMatches,
         "o" | "open" | "e" | "edit" if rest.is_empty() => {
             return Err(format!(":{word} needs a file path"));
         }
@@ -457,6 +475,12 @@ mod tests {
         );
         assert_eq!(parse_ex("wq"), Ok(Some(Command::WriteQuit)));
         assert_eq!(parse_ex("e!"), Ok(Some(Command::Revert)));
+        assert_eq!(parse_ex("redact"), Ok(Some(Command::ApplyRedactions(None))));
+        assert_eq!(
+            parse_ex("redact out.pdf"),
+            Ok(Some(Command::ApplyRedactions(Some("out.pdf".into()))))
+        );
+        assert_eq!(parse_ex("redact-matches"), Ok(Some(Command::RedactMatches)));
         assert_eq!(
             Command::parse("highlight g"),
             Ok(Command::Highlight(Some('g')))

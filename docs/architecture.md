@@ -166,7 +166,14 @@ changed pages' *generation* is bumped. The generation is part of the tile key,
 so old tiles of those pages remain the fallback until the new ones arrive (no
 flash), and other pages' tiles stay valid. `:w` saves into the original file
 incrementally (append-only); the file's size and time are remembered so the
-watcher doesn't reload pdfv's own save. `app/annotations.rs` holds the UI side:
+watcher doesn't reload pdfv's own save. Redaction marks are `Redact` annotations. Applying them
+(`EditorState::apply_redactions`) saves the current state to a scratch file,
+opens that as a separate document, runs MuPDF's page redaction with black
+boxes, pixel blanking for images, removal of covered line art and text
+removal, writes the result as a full rewrite with garbage collection, then
+re-opens the written file and checks the text under every mark is gone.
+`app/redact.rs` has marking (selection, search matches, area mode) and the
+result handling. `app/annotations.rs` holds the UI side of annotations:
 selection → rectangles per page, the comment editor (`ui/comment.rs`), the
 panel (`ui/annotations.rs`), markers and hover tooltips, the quit/reload
 guards.
@@ -201,6 +208,7 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `platform.rs` | Files opened from the system (macOS `application:openURLs:`) |
 | `annotate.rs` | Annotation editor thread: highlights, comments, redaction marks, undo, saving |
 | `app/annotations.rs`, `ui/annotations.rs`, `ui/comment.rs` | Annotations UI |
+| `app/redact.rs` | Redaction marks, area mode, applying |
 | `welcome.rs` | The page shown when no document is open |
 | `scripts/` | App bundle and icon generation (macOS) |
 | `selection.rs` | Text positions, caret motions, selections, clean copying |

@@ -87,6 +87,10 @@ pub enum EditRequest {
     Save {
         path: Option<PathBuf>,
     },
+    /// Apply every redaction mark to a copy written to `out`.
+    ApplyRedactions {
+        out: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +104,17 @@ pub enum EditEvent {
         pages: Vec<usize>,
         working_copy: PathBuf,
         unsaved: bool,
+        /// Unsaved changes other than redaction marks.
+        unsaved_other: bool,
+    },
+    /// Redactions applied and written to `path`; `leftover` lists marks under
+    /// which text was still found when the written file was re-read (empty
+    /// when the check passed).
+    Redacted {
+        path: PathBuf,
+        marks: usize,
+        pages: usize,
+        leftover: Vec<String>,
     },
     Saved {
         path: PathBuf,
@@ -203,6 +218,7 @@ struct EditorState {
     work_version: u32,
     working_copies: Vec<PathBuf>,
     unsaved: bool,
+    unsaved_other: bool,
 }
 
 pub fn rgb_to_color(c: [u8; 3]) -> AnnotationColor {
@@ -266,6 +282,7 @@ impl EditorState {
             work_version: 0,
             working_copies: Vec::new(),
             unsaved: false,
+            unsaved_other: false,
         })
     }
 
@@ -406,7 +423,18 @@ impl EditorState {
     }
 
     fn handle(&mut self, req: EditRequest) -> Result<EditEvent> {
+        // Whether this change touches something other than redaction marks.
+        let other = match &req {
+            EditRequest::Create(a) => a.kind != AnnotKind::Redact,
+            EditRequest::Delete { page, xref } => {
+                let p = self.page(*page)?;
+                let a = self.find(&p, *xref)?;
+                a.r#type()? != PdfAnnotationType::Redact
+            }
+            _ => true,
+        };
         let (pages, inverse) = match req {
+            EditRequest::ApplyRedactions { out } => return self.apply_redactions(&out),
             EditRequest::Save { path } => return self.save(path),
             EditRequest::Undo => {
                 let Some(group) = self.undo.pop() else {
@@ -468,12 +496,14 @@ impl EditorState {
             self.undo.push(inv);
         }
         self.unsaved = true;
+        self.unsaved_other |= other;
         let working_copy = self.write_working_copy()?;
         Ok(EditEvent::Changed {
             annots: self.read_all(),
             pages,
             working_copy,
             unsaved: self.unsaved,
+            unsaved_other: self.unsaved_other,
         })
     }
 
@@ -573,6 +603,7 @@ impl EditorState {
                         .with_context(|| format!("cannot replace {}", target.display()))?;
                 }
                 self.unsaved = false;
+                self.unsaved_other = false;
                 Ok(EditEvent::Saved {
                     path: target,
                     original: true,
@@ -591,6 +622,93 @@ impl EditorState {
                 })
             }
         }
+    }
+
+    /// Apply the redaction marks to a copy of the document and write it to
+    /// `out`, then re-read `out` and check that no text is left under any
+    /// mark. The open document keeps its marks (nothing is removed from it).
+    fn apply_redactions(&mut self, out: &Path) -> Result<EditEvent> {
+        use mupdf::pdf::{
+            PdfRedactImageMethod, PdfRedactLineArtMethod, PdfRedactOptions, PdfRedactTextMethod,
+        };
+
+        let marks: Vec<(usize, Vec<TextRect>)> = self
+            .read_all()
+            .into_iter()
+            .filter(|a| a.kind == AnnotKind::Redact)
+            .map(|a| (a.page, a.rects))
+            .collect();
+        if marks.is_empty() {
+            bail!(
+                "No redaction marks: mark text with x in visual mode, an area with X, \
+                 or search matches with :redact-matches"
+            );
+        }
+        if out == self.original {
+            bail!("Redaction never overwrites the original; give another path");
+        }
+        let mut pages: Vec<usize> = marks.iter().map(|(p, _)| *p).collect();
+        pages.sort_unstable();
+        pages.dedup();
+
+        // Work on a separate copy: applying redactions is destructive.
+        std::fs::create_dir_all(&self.work_dir)?;
+        let src = self.work_dir.join("redact-source.pdf");
+        let src_str = src.to_str().context("temp path is not UTF-8")?;
+        self.doc
+            .save_with_options(src_str, PdfWriteOptions::default())?;
+        let copy = PdfDocument::open(src_str)?;
+        let options = PdfRedactOptions {
+            black_boxes: true,
+            image_method: PdfRedactImageMethod::Pixels,
+            line_art: PdfRedactLineArtMethod::RemoveIfCovered,
+            text: PdfRedactTextMethod::Remove,
+        };
+        for &page in &pages {
+            let mut p = copy.load_pdf_page(page as i32)?;
+            p.redact_with_options(options)
+                .with_context(|| format!("cannot redact page {}", page + 1))?;
+        }
+        // A full rewrite with garbage collection: nothing removed may survive
+        // in the file (an incremental save would keep the old content).
+        let out_str = out.to_str().context("path is not UTF-8")?;
+        let mut opts = PdfWriteOptions::default();
+        opts.set_incremental(false);
+        opts.set_garbage_level(4);
+        opts.set_clean(true);
+        opts.set_sanitize(true);
+        copy.save_with_options(out_str, opts)
+            .with_context(|| format!("cannot write {}", out.display()))?;
+        drop(copy);
+        let _ = std::fs::remove_file(&src);
+
+        // Check the written file.
+        let check = crate::document::open(out)?;
+        let mut leftover = Vec::new();
+        for (page, rects) in &marks {
+            let text = crate::document::page_text(&check, *page)?;
+            let found: String = text
+                .chars
+                .iter()
+                .filter(|c| !c.c.is_whitespace())
+                .filter(|c| {
+                    let (cx, cy) = ((c.x0 + c.x1) / 2.0, (c.y0 + c.y1) / 2.0);
+                    rects
+                        .iter()
+                        .any(|r| cx > r.x0 && cx < r.x1 && cy > r.y0 && cy < r.y1)
+                })
+                .map(|c| c.c)
+                .collect();
+            if !found.is_empty() {
+                leftover.push(format!("page {}: {found:?}", page + 1));
+            }
+        }
+        Ok(EditEvent::Redacted {
+            path: out.to_owned(),
+            marks: marks.len(),
+            pages: pages.len(),
+            leftover,
+        })
     }
 
     fn cleanup(&self) {
@@ -624,6 +742,58 @@ mod tests {
                 a.contents
             );
         }
+    }
+
+    /// Redacting a marked word removes it from the written copy and leaves
+    /// the original alone.
+    #[test]
+    fn redaction_removes_text_in_a_copy() {
+        let dir = std::env::temp_dir().join(format!("pdfv-redact-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("doc.pdf");
+        std::fs::write(&src, crate::welcome::pdf_bytes()).unwrap();
+        let doc = crate::document::open(&src).unwrap();
+        let text = crate::document::page_text(&doc, 0).unwrap();
+        let (a, b) = text.find("No document", true)[0];
+        let rects = text.rects((a, b));
+        drop(doc);
+
+        let mut st = EditorState::open(&src, "t".into()).unwrap();
+        st.handle(EditRequest::Create(NewAnnot {
+            kind: AnnotKind::Redact,
+            parts: vec![(0, rects)],
+            color: [0, 0, 0],
+            contents: String::new(),
+        }))
+        .unwrap();
+        let out = dir.join("doc-redacted.pdf");
+        let EditEvent::Redacted {
+            marks, leftover, ..
+        } = st
+            .handle(EditRequest::ApplyRedactions { out: out.clone() })
+            .unwrap()
+        else {
+            panic!("expected Redacted")
+        };
+        assert_eq!((marks, leftover.len()), (1, 0), "{leftover:?}");
+
+        let red = crate::document::open(&out).unwrap();
+        let t = crate::document::page_text(&red, 0).unwrap();
+        assert!(t.find("No document", true).is_empty());
+        assert!(!t.find("Press ?", true).is_empty(), "other text survives");
+        let orig = crate::document::open(&src).unwrap();
+        let t = crate::document::page_text(&orig, 0).unwrap();
+        assert!(
+            !t.find("No document", true).is_empty(),
+            "original untouched"
+        );
+        assert!(
+            st.handle(EditRequest::ApplyRedactions { out: src.clone() })
+                .is_err()
+        );
+
+        st.cleanup();
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Full round trip on a real document: create, recolour, comment, undo,

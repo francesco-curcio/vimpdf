@@ -23,12 +23,14 @@ use crate::viewport::{FitMode, Viewport};
 mod annotations;
 mod hints;
 mod reading;
+mod redact;
 mod searching;
 mod visual;
 
 use annotations::Annotations;
 use hints::HintState;
 use reading::{OutlineState, Persistence};
+use redact::AreaState;
 use visual::{ContextMenu, Drag};
 
 const BACKGROUND: Color32 = Color32::from_gray(40);
@@ -79,6 +81,8 @@ pub struct PdfvApp {
     outline: OutlineState,
     persist: Persistence,
     annots: Annotations,
+    /// The rectangle being placed in redact-area mode.
+    area: Option<AreaState>,
 }
 
 impl PdfvApp {
@@ -128,6 +132,7 @@ impl PdfvApp {
             outline: OutlineState::default(),
             persist: Persistence::default(),
             annots: Annotations::default(),
+            area: None,
         };
         app.install_font(ctx, &mut warnings);
         app.watch_file(ctx);
@@ -472,6 +477,10 @@ impl PdfvApp {
             Command::Write(path) => self.write(path),
             Command::WriteQuit => self.write_quit(ctx),
             Command::ForceQuit => self.force_quit(ctx),
+            Command::RedactSelection => self.redact_selection(),
+            Command::RedactArea => self.start_redact_area(),
+            Command::RedactMatches => self.redact_matches(),
+            Command::ApplyRedactions(path) => self.apply_redactions(path),
             Command::Set { option, value } => match self.config.set_from_str(&option, &value) {
                 Ok(key) => {
                     let mut warnings = Vec::new();
@@ -613,6 +622,13 @@ impl PdfvApp {
                 .filter_map(|tok| self.outline_key(tok))
                 .collect();
         }
+        if self.mode == Mode::RedactArea {
+            let events = ctx.input(|i| i.events.clone());
+            for tok in key_tokens(&events) {
+                self.area_key(&tok);
+            }
+            return Vec::new();
+        }
         if self.mode == Mode::Annotations {
             let events = ctx.input(|i| i.events.clone());
             return key_tokens(&events)
@@ -744,7 +760,15 @@ impl eframe::App for PdfvApp {
         // Input → commands.
         let mut commands = self.keyboard_commands(&ctx);
         let mut cursor = egui::CursorIcon::Default;
-        if !ctx.egui_wants_pointer_input() && self.menu.is_none() {
+        if self.mode == Mode::RedactArea && !ctx.egui_wants_pointer_input() {
+            self.area_mouse(&ctx, area);
+            let hover = ctx
+                .input(|i| i.pointer.hover_pos())
+                .filter(|p| area.contains(*p));
+            if let Some(c) = self.area_hover_cursor(hover) {
+                cursor = c;
+            }
+        } else if !ctx.egui_wants_pointer_input() && self.menu.is_none() {
             let (cmds, text_cursor) = self.mouse_selection(&ctx, area);
             commands.extend(cmds);
             if let Some(c) = text_cursor {
@@ -817,6 +841,7 @@ impl eframe::App for PdfvApp {
             .draw(&painter, area, &vp, scale, recolor, page_color);
         self.draw_search_highlights(&painter, area, &vp);
         self.draw_annotation_markers(&ctx, &painter, area, &vp);
+        self.draw_redactions(&painter, area, &vp);
         self.draw_selection(&painter, area, &vp);
         self.draw_hints(&painter, area, &vp);
 

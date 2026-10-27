@@ -29,6 +29,8 @@ pub(super) enum CommentTarget {
 pub(super) struct Annotations {
     pub list: Vec<AnnotInfo>,
     pub unsaved: bool,
+    /// Unsaved changes other than redaction marks.
+    pub unsaved_other: bool,
     last_letter: Option<char>,
     comment: Option<(CommentTarget, CommentEditor)>,
     /// Panel selection, and whether to scroll to it.
@@ -47,7 +49,7 @@ impl PdfvApp {
     }
 
     /// The selection as rectangles per page.
-    fn selection_parts(&self) -> Vec<(usize, Vec<TextRect>)> {
+    pub(super) fn selection_parts(&self) -> Vec<(usize, Vec<TextRect>)> {
         let Some(sel) = self.selection else {
             return Vec::new();
         };
@@ -227,7 +229,9 @@ impl PdfvApp {
                     pages,
                     working_copy,
                     unsaved,
+                    unsaved_other,
                 } => {
+                    self.annots.unsaved_other = unsaved_other;
                     tracing::debug!(count = annots.len(), ?pages, unsaved, "annotations changed");
                     self.annots.list = annots;
                     self.annots.unsaved = unsaved;
@@ -242,6 +246,7 @@ impl PdfvApp {
                         .unwrap_or_default();
                     if original {
                         self.annots.unsaved = false;
+                        self.annots.unsaved_other = false;
                         self.remember_file_stamp();
                         self.info(format!("Saved annotations to {name}"));
                         if self.annots.quit_after_save {
@@ -251,6 +256,12 @@ impl PdfvApp {
                         self.info(format!("Saved a copy as {}", path.display()));
                     }
                 }
+                EditEvent::Redacted {
+                    path,
+                    marks,
+                    pages,
+                    leftover,
+                } => self.redaction_done(ctx, path, marks, pages, leftover),
                 EditEvent::Info(msg) => self.info(msg),
                 EditEvent::Error(msg) => {
                     self.annots.quit_after_save = false;

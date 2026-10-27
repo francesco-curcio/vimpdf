@@ -10,8 +10,8 @@ continuous scrolling, vim motions with counts, links, zoom and fit modes,
 status bar, `:` command line, config file, toolbar, help overlay, search,
 link hints, jumplist and marks, text selection with vim visual mode and the
 mouse, recolor (dark mode), outline panel, remembered positions, auto-reload,
-a macOS app bundle that can be the default PDF viewer (Finder, Firefox), and
-highlights and comments saved into the PDF.
+a macOS app bundle that can be the default PDF viewer (Finder, Firefox),
+highlights and comments saved into the PDF, and redaction (censoring).
 
 Documentation:
 
@@ -103,6 +103,7 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `gv` | Word hints: a label on every word on screen; typing one starts visual mode there |
 | `<C-a>` | Annotations panel (all highlights, comments and redaction marks) |
 | `u` | Undo the last annotation change |
+| `X` | Mark an area for redaction (see Redaction) |
 | `:` | Command line |
 | `?` | Help overlay: active keys, mouse actions, commands. Your scroll keys (`j`/`k`, `<C-d>`/`<C-u>`, `gg`/`G`, counts…) scroll it; `?`, `Esc` or `q` close it |
 | `<Tab>` | Outline (table of contents) panel |
@@ -163,6 +164,8 @@ cancels; Up / Down browse the history.
 | `:q!` | Quit, discarding unsaved annotations |
 | `:e!` | Reload the file, discarding unsaved annotations |
 | `:annotations` | Annotations panel |
+| `:redact-matches` | Mark every match of the current search for redaction |
+| `:redact [path]` | Apply all redaction marks, writing `<name>-redacted.pdf` (or `path`) |
 | `:<command> [args]` | Any bindable command, e.g. `:zoom_in 3`, `:fit_page` |
 
 ### Search
@@ -246,6 +249,35 @@ Zotero and other viewers show them too.
   you save (`:w`) or discard (`:q!`, `:e!`); closing the window warns once.
 - If the file changes on disk while you have unsaved annotations, pdfv
   doesn't reload it but tells you; its own saves never trigger a reload.
+
+### Redaction (censoring)
+
+Redaction permanently removes content. pdfv never applies it to the original
+file: it always writes a new one.
+
+1. Mark what to remove — marks are red boxes, and they're annotations like the
+   others (listed in `<C-a>`, removable with `d`, undoable with `u`):
+   - text: select it (`v` + motions, or the mouse) and press `x`;
+   - every occurrence of a word or name: search it (`/name`), then
+     `:redact-matches`;
+   - an area (figure, image, signature): `X` puts a rectangle in the middle of
+     the view; `h`/`j`/`k`/`l` move it, `H`/`J`/`K`/`L` resize it (counts work:
+     `10L`), Enter marks it, Esc cancels — or drag a rectangle with the mouse.
+2. `:redact` applies every mark to a copy of the document and writes
+   `<name>-redacted.pdf` next to it (`:redact <path>` chooses the name; an
+   existing file is never overwritten, the original never). Under each mark,
+   text is removed, image pixels are blanked, vector drawings that are fully
+   covered are removed, and a black box is drawn. The file is rewritten from
+   scratch with garbage collection, so nothing removed survives inside it.
+3. pdfv then re-reads the written file and checks that no text is left under
+   any mark, reports the result, and opens the redacted file (if your only
+   unsaved changes were the marks).
+
+**Check before sharing.** Search-based marking only finds real text. Text that
+is part of a figure (labels drawn as shapes, or inside an image) and scanned
+pages are invisible to search: look through the document and cover them with
+area marks (`X`). Document metadata (title, author, keywords in the file's
+properties) is not changed.
 
 ### Reading comfort
 

@@ -433,6 +433,7 @@ file, never over the original.
 - **Done when:** a name searched and redacted in a real paper, plus an area over
   a figure, are gone from the written file (no text extraction or search finds
   them, the figure pixels are blank), and the original file is unchanged.
+- **Status:** done. On a copy of the LIGO paper: `/Hanford` + `:redact-matches` (4 matches on 3 pages) and an `X` area over part of Fig. 1, then `:redact`: the written file has no "Hanford" left (search finds 0, the re-read check passed), the area is black, the original is byte-identical. Finding: a label *inside* the figure ("Hanford, Wash." drawn as shapes) is not text, so search can't find it; documented — such content needs area marks. Metadata isn't stripped (documented).
 
 ### M11 — Menu bar
 

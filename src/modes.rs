@@ -16,6 +16,8 @@ pub enum Mode {
     Annotations,
     /// Writing a comment.
     Comment,
+    /// Placing a rectangle to redact (`X`).
+    RedactArea,
 }
 
 impl Mode {
@@ -29,6 +31,7 @@ impl Mode {
             Mode::Outline => "OUTLINE",
             Mode::Annotations => "ANNOTATIONS",
             Mode::Comment => "COMMENT",
+            Mode::RedactArea => "REDACT AREA",
         }
     }
 }
