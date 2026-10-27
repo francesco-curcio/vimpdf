@@ -2820,26 +2820,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pdfv"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "crossbeam-channel",
- "directories",
- "eframe",
- "mupdf",
- "notify",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "toml",
- "tracing",
- "tracing-subscriber",
- "winit",
-]
-
-[[package]]
 name = "peniko"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4007,6 +3987,26 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vimpdf"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossbeam-channel",
+ "directories",
+ "eframe",
+ "mupdf",
+ "notify",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "winit",
+]
 
 [[package]]
 name = "walkdir"

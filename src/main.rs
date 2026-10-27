@@ -26,7 +26,7 @@ use anyhow::{Context, Result, bail};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-use crate::app::PdfvApp;
+use crate::app::VimpdfApp;
 use crate::config::Config;
 use crate::document::DocInfo;
 
@@ -34,11 +34,11 @@ use crate::document::DocInfo;
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
-    /// PDF file to open (without one, pdfv waits for a file from the system,
+    /// PDF file to open (without one, vimpdf waits for a file from the system,
     /// e.g. Finder's Open With, or shows a welcome page).
     file: Option<PathBuf>,
 
-    /// Config file to use instead of ~/.config/pdfv/config.toml.
+    /// Config file to use instead of ~/.config/vimpdf/config.toml.
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
 }
@@ -46,7 +46,7 @@ struct Args {
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("pdfv=info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("vimpdf=info")),
         )
         .init();
 
@@ -54,7 +54,7 @@ fn main() -> ExitCode {
     match run(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("pdfv: {err:#}");
+            eprintln!("vimpdf: {err:#}");
             ExitCode::FAILURE
         }
     }
@@ -84,7 +84,7 @@ fn run(args: Args) -> Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("pdfv")
+            .with_title("vimpdf")
             .with_inner_size([900.0, 1100.0])
             .with_maximized(config.start_maximised)
             .with_active(true),
@@ -113,7 +113,7 @@ fn run(args: Args) -> Result<()> {
             .unwrap_or_default();
         cc.egui_ctx
             .send_viewport_cmd(eframe::egui::ViewportCommand::Title(name));
-        Ok(Box::new(PdfvApp::new(
+        Ok(Box::new(VimpdfApp::new(
             cc,
             path,
             info,
@@ -122,7 +122,7 @@ fn run(args: Args) -> Result<()> {
             warnings,
         )))
     });
-    let mut app = eframe::create_native("pdfv", options, creator, &event_loop);
+    let mut app = eframe::create_native("vimpdf", options, creator, &event_loop);
     event_loop
         .run_app(&mut app)
         .map_err(|e| anyhow::anyhow!("failed to run the window: {e}"))

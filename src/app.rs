@@ -49,7 +49,7 @@ struct Message {
     since: Instant,
 }
 
-pub struct PdfvApp {
+pub struct VimpdfApp {
     view: DocView,
     viewport: Option<Viewport>,
     config: Config,
@@ -90,7 +90,7 @@ pub struct PdfvApp {
     show_props: bool,
 }
 
-impl PdfvApp {
+impl VimpdfApp {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         path: PathBuf,
@@ -735,7 +735,7 @@ fn color32(c: Color) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 
-impl eframe::App for PdfvApp {
+impl eframe::App for VimpdfApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if self.first_frame {
@@ -743,7 +743,7 @@ impl eframe::App for PdfvApp {
             ctx.send_viewport_cmd(ViewportCommand::Focus);
             self.first_frame = false;
         }
-        // pdfv handles the keyboard itself: egui's Tab focus navigation must
+        // vimpdf handles the keyboard itself: egui's Tab focus navigation must
         // not leave a button focused, or Enter/Space would "click" it. Only
         // text fields (command line, toolbar page box) keep focus.
         if !ctx.text_edit_focused()

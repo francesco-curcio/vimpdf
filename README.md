@@ -1,4 +1,4 @@
-# pdfv
+# vimpdf
 
 A keyboard-driven, vim-style PDF viewer written in Rust, tuned for reading
 scientific papers. Everything works from the keyboard; the mouse works too
@@ -39,7 +39,7 @@ cargo build --release
 
 The first build compiles MuPDF from source and takes a minute or two.
 
-To run it from anywhere as `pdfv`:
+To run it from anywhere as `vimpdf`:
 
 ```fish
 cargo install --path .
@@ -49,21 +49,21 @@ fish_add_path ~/.cargo/bin   # once, if ~/.cargo/bin isn't on your PATH
 ### macOS app (Finder, Dock, Firefox)
 
 ```fish
-scripts/bundle-macos.sh             # builds target/pdfv.app
+scripts/bundle-macos.sh             # builds target/vimpdf.app
 scripts/bundle-macos.sh --install   # …and copies it to ~/Applications
 ```
 
 The bundle declares PDF as a document type it can view, so after installing
 it:
 
-- **Finder**: right-click a PDF → Open With → pdfv. To make it the default,
-  Get Info (⌘I) on a PDF → Open with: pdfv → Change All….
+- **Finder**: right-click a PDF → Open With → vimpdf. To make it the default,
+  Get Info (⌘I) on a PDF → Open with: vimpdf → Change All….
 - **Firefox**: Settings → General → Applications → "Portable Document Format
-  (PDF)" → Use other… → choose `~/Applications/pdfv.app`. Clicking a PDF
-  link then downloads it and opens it in pdfv.
-- Opening a PDF while pdfv is running replaces the open document (one window,
+  (PDF)" → Use other… → choose `~/Applications/vimpdf.app`. Clicking a PDF
+  link then downloads it and opens it in vimpdf.
+- Opening a PDF while vimpdf is running replaces the open document (one window,
   one document). Dropping a PDF on the window does the same.
-- Launched without a file (e.g. from the Dock), pdfv shows a short welcome
+- Launched without a file (e.g. from the Dock), vimpdf shows a short welcome
   page; open a file with `:open <path>` or by dropping it on the window.
 
 The app is signed ad hoc (no Apple developer certificate), which is fine for
@@ -72,9 +72,9 @@ a locally built app. `scripts/make-icon.sh` regenerates the icon.
 ## Usage
 
 ```fish
-pdfv paper.pdf
-pdfv --config other.toml paper.pdf   # use a different config file
-pdfv                                  # welcome page; :open a file from there
+vimpdf paper.pdf
+vimpdf --config other.toml paper.pdf   # use a different config file
+vimpdf                                  # welcome page; :open a file from there
 ```
 
 Key notation follows vim: `<C-d>` is Ctrl+d, `<C-F>` is Ctrl+Shift+f,
@@ -277,12 +277,12 @@ Zotero and other viewers show them too.
   appended). The status bar shows `[+]` after the file name while there are
   unsaved changes. `:q`, opening another file and reloading are refused until
   you save (`:w`) or discard (`:q!`, `:e!`); closing the window warns once.
-- If the file changes on disk while you have unsaved annotations, pdfv
+- If the file changes on disk while you have unsaved annotations, vimpdf
   doesn't reload it but tells you; its own saves never trigger a reload.
 
 ### Redaction (censoring)
 
-Redaction permanently removes content. pdfv never applies it to the original
+Redaction permanently removes content. vimpdf never applies it to the original
 file: it always writes a new one.
 
 1. Mark what to remove — marks are red boxes, and they're annotations like the
@@ -299,7 +299,7 @@ file: it always writes a new one.
    text is removed, image pixels are blanked, vector drawings that are fully
    covered are removed, and a black box is drawn. The file is rewritten from
    scratch with garbage collection, so nothing removed survives inside it.
-3. pdfv then re-reads the written file and checks that no text is left under
+3. vimpdf then re-reads the written file and checks that no text is left under
    any mark, reports the result, and opens the redacted file (if your only
    unsaved changes were the marks).
 
@@ -321,7 +321,7 @@ properties) is not changed.
   jumplist (`<C-o>` returns).
 - **Remembered position**: the page, offset, zoom, fit mode and marks of every
   file are saved (on quit, when opening another file, and every few seconds)
-  in `~/.local/state/pdfv/` (or `$XDG_STATE_HOME/pdfv/`) and restored when the
+  in `~/.local/state/vimpdf/` (or `$XDG_STATE_HOME/vimpdf/`) and restored when the
   file is opened again.
 - **Auto-reload**: when the file changes on disk (e.g. LaTeX recompiles it),
   the view reloads in place once the file has stopped changing for 300 ms,
@@ -336,12 +336,12 @@ The page shown is the one at the centre of the window.
 
 ## Configuration
 
-`~/.config/pdfv/config.toml` (also on macOS), or `$XDG_CONFIG_HOME/pdfv/config.toml`.
+`~/.config/vimpdf/config.toml` (also on macOS), or `$XDG_CONFIG_HOME/vimpdf/config.toml`.
 The file isn't created for you; to start from the documented example:
 
 ```fish
-mkdir -p ~/.config/pdfv
-cp config.example.toml ~/.config/pdfv/config.toml
+mkdir -p ~/.config/vimpdf
+cp config.example.toml ~/.config/vimpdf/config.toml
 ```
 
 A missing file means defaults. Invalid entries are reported in the status bar
@@ -367,7 +367,7 @@ command name, and [config.example.toml](config.example.toml) for a starting poin
 
 ## Troubleshooting
 
-- Logging: `RUST_LOG=pdfv=debug pdfv paper.pdf`. `pdfv=trace` also logs every
+- Logging: `RUST_LOG=vimpdf=debug vimpdf paper.pdf`. `vimpdf=trace` also logs every
   command, every scroll position and every frame where a page had no render yet.
 - Config warnings are listed in full in the log; the status bar shows the first.
 
@@ -376,7 +376,7 @@ command name, and [config.example.toml](config.example.toml) for a starting poin
 ```fish
 cargo test
 # Rendering tests against a real PDF (PDFs are not committed to the repo):
-env PDFV_TEST_PDF=paper.pdf cargo test -- --ignored
+env VIMPDF_TEST_PDF=paper.pdf cargo test -- --ignored
 ```
 
 ## License

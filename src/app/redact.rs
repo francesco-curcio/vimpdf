@@ -21,7 +21,7 @@ pub(super) struct AreaState {
     drag_from: Option<(f32, f32)>,
 }
 
-impl PdfvApp {
+impl VimpdfApp {
     /// `x` in visual mode.
     pub(super) fn redact_selection(&mut self) {
         let parts = self.selection_parts();
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn redacted_path_never_overwrites() {
-        let dir = std::env::temp_dir().join(format!("pdfv-redpath-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vimpdf-redpath-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = dir.join("paper.pdf");
         assert_eq!(default_redacted_path(&src), dir.join("paper-redacted.pdf"));

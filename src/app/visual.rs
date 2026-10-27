@@ -28,7 +28,7 @@ pub(super) struct ContextMenu {
     annot: Option<(usize, i32, crate::annotate::AnnotKind)>,
 }
 
-impl PdfvApp {
+impl VimpdfApp {
     /// `v` / `V`: start visual mode, switch between char- and line-wise, or
     /// leave it.
     pub(super) fn visual(&mut self, linewise: bool) {
@@ -427,7 +427,7 @@ impl PdfvApp {
             .map(|(k, c)| (*k, [c.0[0], c.0[1], c.0[2]]))
             .collect();
         let mut chosen = None;
-        let response = egui::Area::new(egui::Id::unique("pdfv-context-menu"))
+        let response = egui::Area::new(egui::Id::unique("vimpdf-context-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(menu.pos)
             .show(ctx, |ui| {

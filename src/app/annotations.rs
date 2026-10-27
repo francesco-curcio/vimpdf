@@ -42,7 +42,7 @@ pub(super) struct Annotations {
     close_attempt: Option<Instant>,
 }
 
-impl PdfvApp {
+impl VimpdfApp {
     fn letter_color(&self, letter: char) -> Option<[u8; 3]> {
         let c = self.config.highlight_color(letter)?;
         Some([c.0[0], c.0[1], c.0[2]])
@@ -531,7 +531,7 @@ impl PdfvApp {
             && let Some(a) = self.annot_at(area, pos)
             && !a.contents.is_empty()
         {
-            egui::Area::new(egui::Id::unique("pdfv-annot-tip-area"))
+            egui::Area::new(egui::Id::unique("vimpdf-annot-tip-area"))
                 .order(egui::Order::Tooltip)
                 .fixed_pos(pos + Vec2::new(14.0, 14.0))
                 .show(ctx, |ui| {

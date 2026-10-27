@@ -1,4 +1,4 @@
-// Draws the pdfv app icon (1024×1024 PNG). Used by scripts/make-icon.sh.
+// Draws the vimpdf app icon (1024×1024 PNG). Used by scripts/make-icon.sh.
 // Usage: swift scripts/make-icon.swift out.png
 import AppKit
 

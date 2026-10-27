@@ -41,7 +41,7 @@ impl CommentEditor {
             });
             (plain_enter, i.key_pressed(Key::Escape))
         });
-        let id = Id::unique("pdfv-comment-editor");
+        let id = Id::unique("vimpdf-comment-editor");
         let mut save_clicked = false;
         let mut cancel_clicked = false;
         egui::Window::new(self.title.as_str())

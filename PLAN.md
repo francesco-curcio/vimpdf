@@ -2,8 +2,8 @@
 
 A keyboard-driven, vim-style PDF viewer written in Rust, tuned for reading
 scientific papers. Personal project, macOS (Apple Silicon) first; Linux support
-later. Working name: `pdfv` (rename freely — only the crate name and config
-paths depend on it).
+later. Name: `vimpdf` (crate, binary, config and state paths; it was called
+`pdfv` until 2026-10-27).
 
 The target sits between zathura and okular: zathura's keyboard-first, minimal
 UI, but with okular's mouse support and discoverability available when wanted.
@@ -33,7 +33,7 @@ Deviations from sections 2–3:
 
 Not yet checked by a human: the visual appearance (bars, help, outline panel,
 highlight colours, recolor), pinch-to-zoom on a real trackpad, and choosing
-pdfv inside Firefox's settings. Known limitations are listed per milestone
+vimpdf inside Firefox's settings. Known limitations are listed per milestone
 and in the README.
 
 ---
@@ -72,7 +72,7 @@ and in the README.
 | Config | `serde` + `toml` | |
 | Paths | `directories` crate | Config and state locations. |
 | Errors | `anyhow` in the binary, `thiserror` in library-style modules | |
-| Logging | `tracing` + `tracing-subscriber` (env-filter) | `RUST_LOG=pdfv=debug` |
+| Logging | `tracing` + `tracing-subscriber` (env-filter) | `RUST_LOG=vimpdf=debug` |
 | CLI args | `clap` (derive) | |
 | File watching | `notify` (milestone 7) | |
 | Channels | `crossbeam-channel` | Main thread ↔ render workers. |
@@ -235,7 +235,7 @@ Command line: `:q`, `:open <path>`, `:<n>` (go to page n), `:set <option> <value
 
 ## 5. Config
 
-Location: `~/.config/pdfv/config.toml` (use this path on macOS too, rather than
+Location: `~/.config/vimpdf/config.toml` (use this path on macOS too, rather than
 `~/Library/Application Support`, so it lives next to other dotfiles).
 
 ```toml
@@ -291,7 +291,7 @@ manual check against a real paper, and a git commit.
 ### M0 — Skeleton
 
 - `cargo new`, AGPL-3.0 `LICENSE`, `README.md` with build instructions.
-- `pdfv <file.pdf>` opens a window and shows page 1 rendered via MuPDF.
+- `vimpdf <file.pdf>` opens a window and shows page 1 rendered via MuPDF.
 - Logging set up; clear error message for missing/invalid file.
 - **Done when:** a real arXiv paper's first page displays correctly and sharply on Retina.
 - **Status:** done (`de59782`). Page 1 rendered at Retina scale (2×) was checked from an image dump; the window was checked on a Retina display by the user.
@@ -364,7 +364,7 @@ manual check against a real paper, and a git commit.
 
 - Recolor mode (`<C-r>`): render with inverted/adjusted colours for dark reading, configurable colours.
 - Outline/TOC panel (`<Tab>`), navigable with `j`/`k`/`Enter` and clickable with the mouse.
-- Persist per-file state (last position, zoom, fit mode) in `~/.local/state/pdfv/` keyed by a hash of the canonical path; restore on open.
+- Persist per-file state (last position, zoom, fit mode) in `~/.local/state/vimpdf/` keyed by a hash of the canonical path; restore on open.
 - Auto-reload when the file changes on disk (useful with LaTeX), keeping the current position.
 - **Done when:** reopening a paper returns to the same spot; recompiling a LaTeX document updates the view in place.
 - **Status:** done (`a8742d8`). Reopening restored page, zoom and marks; a real `pdflatex` recompile reloaded once and kept the position. State is also saved every 10 s and on `:open`. Added `ui.recolor` and `ui.auto_reload` options.
@@ -374,7 +374,7 @@ manual check against a real paper, and a git commit.
 - Build a proper `.app` bundle (e.g. with `cargo-bundle` or a small script) with an `Info.plist` declaring PDF as a supported document type, plus an icon.
 - Handle files opened via Finder / Firefox "open with" (the macOS open-document Apple Event). Investigate what `winit`/`eframe` currently expose for this; if it isn't supported, document the gap and fall back to an AppleScript wrapper app that calls the binary with the file path.
 - **Done when:** the app can be set as the PDF handler in Firefox and opens papers focused and maximised.
-- **Status:** done (`64f2afd`, `dfbb2a8`). `scripts/bundle-macos.sh [--install]` builds `target/pdfv.app`. winit 0.30 registers its own app delegate (its docs say otherwise) and aborts if it's replaced, so `application:openURLs:` is added to winit's delegate class at runtime; no AppleScript wrapper needed. Tested with `open -a`: launch with a file, a second file to the running app, launch without a file (welcome page). A newly opened file replaces the current one (one window).
+- **Status:** done (`64f2afd`, `dfbb2a8`). `scripts/bundle-macos.sh [--install]` builds `target/vimpdf.app`. winit 0.30 registers its own app delegate (its docs say otherwise) and aborts if it's replaced, so `application:openURLs:` is added to winit's delegate class at runtime; no AppleScript wrapper needed. Tested with `open -a`: launch with a file, a second file to the running app, launch without a file (welcome page). A newly opened file replaces the current one (one window).
 
 ### M9 — Highlights and comments
 
@@ -403,9 +403,9 @@ viewers (Preview, Acrobat, Zotero) show them too.
   original bytes are kept), `:w <path>` saves a copy, `:q` refuses to quit
   with unsaved changes (`:q!` forces, `:wq` saves and quits); closing the window
   warns once. The status bar shows `[+]` while there are unsaved changes.
-  pdfv's own saves don't trigger auto-reload; an external change while there
+  vimpdf's own saves don't trigger auto-reload; an external change while there
   are unsaved changes is reported instead of reloaded.
-- **Done when:** highlights in three colours and a comment added in pdfv
+- **Done when:** highlights in three colours and a comment added in vimpdf
   (keyboard only, and with the mouse) are saved with `:w`, survive reopening,
   and the PDF's annotations are listed with the right colours and comment by
   MuPDF on re-read.

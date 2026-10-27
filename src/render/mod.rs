@@ -133,7 +133,7 @@ impl Renderer {
             let tx = tx.clone();
             let wake = Arc::clone(&wake);
             thread::Builder::new()
-                .name(format!("pdfv-render-{i}"))
+                .name(format!("vimpdf-render-{i}"))
                 .spawn(move || worker(shared, tx, move || wake()))
                 .expect("failed to spawn render thread");
         }

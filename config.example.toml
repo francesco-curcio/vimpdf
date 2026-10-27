@@ -1,4 +1,4 @@
-# Example pdfv config. Copy to ~/.config/pdfv/config.toml and edit.
+# Example vimpdf config. Copy to ~/.config/vimpdf/config.toml and edit.
 # Every option is optional; these are the defaults unless noted.
 # Full reference: docs/configuration.md
 

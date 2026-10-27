@@ -271,7 +271,7 @@ pub fn show(
             BAR_TEXT,
         );
         let resp = ui
-            .interact(r, Id::unique(("pdfv-menu-title", i)), Sense::CLICK)
+            .interact(r, Id::unique(("vimpdf-menu-title", i)), Sense::CLICK)
             .on_hover_cursor(CursorIcon::PointingHand);
         if resp.clicked() {
             if state.menu == Some(i) {
@@ -387,7 +387,7 @@ pub fn show(
     let items = &menus[m].items;
     let (a, rows) = popup(
         ctx,
-        "pdfv-menu-popup",
+        "vimpdf-menu-popup",
         anchor,
         items,
         state.item,
@@ -404,7 +404,7 @@ pub fn show(
     {
         let (a, _) = popup(
             ctx,
-            "pdfv-menu-sub",
+            "vimpdf-menu-sub",
             row.right_top() + Vec2::new(8.0, -4.0),
             sub,
             sel,

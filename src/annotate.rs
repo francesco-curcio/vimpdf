@@ -134,7 +134,7 @@ impl Editor {
         let (req_tx, req_rx) = crossbeam_channel::unbounded();
         let (ev_tx, ev_rx) = crossbeam_channel::unbounded();
         thread::Builder::new()
-            .name("pdfv-editor".into())
+            .name("vimpdf-editor".into())
             .spawn(move || {
                 let send = |e: EditEvent| {
                     let ok = ev_tx.send(e).is_ok();
@@ -270,7 +270,7 @@ impl EditorState {
                 Ok((b.x0, b.y0))
             })
             .collect::<Result<Vec<_>, mupdf::Error>>()?;
-        let work_dir = std::env::temp_dir().join(format!("pdfv-work-{}", std::process::id()));
+        let work_dir = std::env::temp_dir().join(format!("vimpdf-work-{}", std::process::id()));
         Ok(Self {
             doc,
             original: path.to_owned(),
@@ -594,7 +594,7 @@ impl EditorState {
                         .with_context(|| format!("cannot save {}", target.display()))?;
                 } else {
                     // Write next to it, then replace it in one step.
-                    let tmp = target.with_extension("pdfv-saving.pdf");
+                    let tmp = target.with_extension("vimpdf-saving.pdf");
                     let tmp_str = tmp.to_str().context("path is not UTF-8")?;
                     self.doc
                         .save_with_options(tmp_str, PdfWriteOptions::default())
@@ -724,11 +724,11 @@ mod tests {
         TextRect { x0, y0, x1, y1 }
     }
 
-    /// Print the annotations of the PDF named by `PDFV_ANNOT_DUMP`.
+    /// Print the annotations of the PDF named by `VIMPDF_ANNOT_DUMP`.
     #[test]
-    #[ignore = "needs PDFV_ANNOT_DUMP"]
+    #[ignore = "needs VIMPDF_ANNOT_DUMP"]
     fn dump_annotations() {
-        let path = std::env::var("PDFV_ANNOT_DUMP").expect("set PDFV_ANNOT_DUMP");
+        let path = std::env::var("VIMPDF_ANNOT_DUMP").expect("set VIMPDF_ANNOT_DUMP");
         for a in EditorState::open(Path::new(&path), "x".into())
             .unwrap()
             .read_all()
@@ -748,7 +748,7 @@ mod tests {
     /// the original alone.
     #[test]
     fn redaction_removes_text_in_a_copy() {
-        let dir = std::env::temp_dir().join(format!("pdfv-redact-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vimpdf-redact-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = dir.join("doc.pdf");
         std::fs::write(&src, crate::welcome::pdf_bytes()).unwrap();
@@ -800,7 +800,7 @@ mod tests {
     /// save into a copy, read back.
     #[test]
     fn create_edit_undo_and_save() {
-        let dir = std::env::temp_dir().join(format!("pdfv-annot-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vimpdf-annot-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = dir.join("doc.pdf");
         std::fs::write(&src, crate::welcome::pdf_bytes()).unwrap();

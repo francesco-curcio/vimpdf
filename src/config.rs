@@ -1,4 +1,4 @@
-//! Configuration: defaults, loading `~/.config/pdfv/config.toml`, and `:set`.
+//! Configuration: defaults, loading `~/.config/vimpdf/config.toml`, and `:set`.
 //!
 //! Every option goes through [`Config::set`], so the config file and `:set`
 //! accept exactly the same values. Invalid entries never abort loading: they
@@ -226,17 +226,17 @@ impl Config {
         }
         std::env::var("USER")
             .or_else(|_| std::env::var("USERNAME"))
-            .unwrap_or_else(|_| "pdfv".into())
+            .unwrap_or_else(|_| "vimpdf".into())
     }
 
-    /// `$XDG_CONFIG_HOME/pdfv/config.toml`, else `~/.config/pdfv/config.toml`
+    /// `$XDG_CONFIG_HOME/vimpdf/config.toml`, else `~/.config/vimpdf/config.toml`
     /// (also on macOS, to live next to other dotfiles).
     pub fn default_path() -> Option<PathBuf> {
         let base = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
             .or_else(|| directories::BaseDirs::new().map(|d| d.home_dir().join(".config")))?;
-        Some(base.join("pdfv").join("config.toml"))
+        Some(base.join("vimpdf").join("config.toml"))
     }
 
     /// Load a config file. A missing file gives the defaults silently.

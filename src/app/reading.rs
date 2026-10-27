@@ -31,14 +31,14 @@ pub(super) struct OutlineState {
 pub(super) struct Persistence {
     watcher: Option<FileWatcher>,
     /// Size and modification time of the file as we last read or wrote it:
-    /// change events that don't change it (pdfv's own saves, events macOS
+    /// change events that don't change it (vimpdf's own saves, events macOS
     /// replays from before the file was opened) are ignored.
     stamp: Option<(u64, std::time::SystemTime)>,
     reload_due: Option<Instant>,
     last_saved: Option<(Instant, FileState)>,
 }
 
-impl PdfvApp {
+impl VimpdfApp {
     pub(super) fn recolor(&self) -> Option<Recolor> {
         let rgb = |c: Color| [c.0[0], c.0[1], c.0[2]];
         self.config.recolor.then(|| Recolor {

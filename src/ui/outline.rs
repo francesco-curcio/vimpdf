@@ -20,7 +20,7 @@ pub fn show(
     let rect = Rect::from_min_size(area.min, Vec2::new(width, area.height()));
     let font = FontId::proportional(font_size);
     let mut clicked = None;
-    egui::Area::new(Id::unique("pdfv-outline"))
+    egui::Area::new(Id::unique("vimpdf-outline"))
         .order(egui::Order::Foreground)
         .fixed_pos(rect.min)
         .show(ctx, |ui| {

@@ -41,7 +41,7 @@ pub type Navigation = (Vec<Vec<PageLink>>, Vec<OutlineItem>);
 pub fn spawn_loader(path: PathBuf, wake: impl Fn() + Send + 'static) -> Receiver<Navigation> {
     let (tx, rx) = mpsc::channel();
     thread::Builder::new()
-        .name("pdfv-links".into())
+        .name("vimpdf-links".into())
         .spawn(move || {
             let start = std::time::Instant::now();
             match document::load_links_and_outline(&path) {

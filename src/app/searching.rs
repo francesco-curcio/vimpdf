@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl PdfvApp {
+impl VimpdfApp {
     pub(super) fn start_search(&mut self, query: String, page: usize, origin_y: f32) {
         let query = if query.trim().is_empty() {
             self.view.search.query.clone()

@@ -62,7 +62,7 @@ impl Searcher {
         let (req_tx, req_rx) = crossbeam_channel::unbounded();
         let (ev_tx, ev_rx) = crossbeam_channel::unbounded();
         thread::Builder::new()
-            .name("pdfv-text".into())
+            .name("vimpdf-text".into())
             .spawn(move || Worker::new(path, ev_tx, wake).map(|w| w.run(req_rx)))
             .expect("failed to spawn text thread");
         Self {

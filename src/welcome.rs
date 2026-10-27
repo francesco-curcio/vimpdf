@@ -1,4 +1,4 @@
-//! A one-page PDF shown when pdfv starts without a document (e.g. the app
+//! A one-page PDF shown when vimpdf starts without a document (e.g. the app
 //! was opened from the Dock). Built here so no asset needs to be shipped.
 
 use std::path::PathBuf;
@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 const LINES: &[(f32, &str)] = &[
-    (28.0, "pdfv"),
+    (28.0, "vimpdf"),
     (13.0, "No document is open."),
     (13.0, ""),
     (13.0, "Open one with   :open <path>"),
@@ -69,7 +69,7 @@ pub fn pdf_bytes() -> Vec<u8> {
 }
 
 fn path() -> PathBuf {
-    std::env::temp_dir().join("pdfv-welcome.pdf")
+    std::env::temp_dir().join("vimpdf-welcome.pdf")
 }
 
 /// Whether `path` (canonical) is the welcome page.
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn welcome_page_is_a_readable_pdf_with_its_text() {
         let path =
-            std::env::temp_dir().join(format!("pdfv-welcome-test-{}.pdf", std::process::id()));
+            std::env::temp_dir().join(format!("vimpdf-welcome-test-{}.pdf", std::process::id()));
         std::fs::write(&path, pdf_bytes()).unwrap();
         let info = crate::document::DocInfo::load(&path).unwrap();
         assert_eq!(info.page_count(), 1);

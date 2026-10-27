@@ -366,14 +366,14 @@ fn pixmap_to_rgb(pixmap: &Pixmap) -> Result<RenderedPage> {
 mod tests {
     use super::*;
 
-    /// Renders page 1 of the PDF named by `PDFV_TEST_PDF` (PDFs are not
+    /// Renders page 1 of the PDF named by `VIMPDF_TEST_PDF` (PDFs are not
     /// committed). Run with:
-    /// `PDFV_TEST_PDF=paper.pdf cargo test -- --ignored`
-    /// Set `PDFV_DUMP=out.ppm` to also write the render to disk.
+    /// `VIMPDF_TEST_PDF=paper.pdf cargo test -- --ignored`
+    /// Set `VIMPDF_DUMP=out.ppm` to also write the render to disk.
     #[test]
-    #[ignore = "needs PDFV_TEST_PDF"]
+    #[ignore = "needs VIMPDF_TEST_PDF"]
     fn renders_first_page_of_real_pdf() {
-        let path = std::env::var("PDFV_TEST_PDF").expect("set PDFV_TEST_PDF");
+        let path = std::env::var("VIMPDF_TEST_PDF").expect("set VIMPDF_TEST_PDF");
         let path = Path::new(&path);
         let info = DocInfo::load(path).unwrap();
         let mut renderer = PageRenderer::open(path).unwrap();
@@ -410,7 +410,7 @@ mod tests {
 
         let (links, outline) = load_links_and_outline(path).unwrap();
         assert_eq!(links.len(), info.page_count());
-        if std::env::var("PDFV_EXPECT_OUTLINE").is_ok() {
+        if std::env::var("VIMPDF_EXPECT_OUTLINE").is_ok() {
             assert!(!outline.is_empty(), "no outline");
             assert!(outline.iter().all(|i| !i.title.is_empty()));
         }
@@ -425,13 +425,13 @@ mod tests {
                 .iter()
                 .all(|c| c.x0 >= -1.0 && c.y1 <= size.height + 1.0)
         );
-        if let Ok(word) = std::env::var("PDFV_TEST_WORD") {
+        if let Ok(word) = std::env::var("VIMPDF_TEST_WORD") {
             assert!(!text.find(&word, false).is_empty(), "'{word}' not found");
         }
 
-        if let Ok(out) = std::env::var("PDFV_DUMP") {
-            // PDFV_DUMP_PAGE picks another page (0-based) for the dump.
-            let n: usize = std::env::var("PDFV_DUMP_PAGE")
+        if let Ok(out) = std::env::var("VIMPDF_DUMP") {
+            // VIMPDF_DUMP_PAGE picks another page (0-based) for the dump.
+            let n: usize = std::env::var("VIMPDF_DUMP_PAGE")
                 .ok()
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(0);

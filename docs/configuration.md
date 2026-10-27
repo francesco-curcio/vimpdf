@@ -1,8 +1,8 @@
 # Configuration
 
-pdfv reads `~/.config/pdfv/config.toml` at startup (`$XDG_CONFIG_HOME/pdfv/config.toml`
+vimpdf reads `~/.config/vimpdf/config.toml` at startup (`$XDG_CONFIG_HOME/vimpdf/config.toml`
 if `XDG_CONFIG_HOME` is set; the same path on macOS, rather than
-`~/Library/Application Support`). Use `pdfv --config <path>` for another file.
+`~/Library/Application Support`). Use `vimpdf --config <path>` for another file.
 
 - A missing file means all defaults.
 - Every invalid entry produces a warning (status bar + log) and keeps its

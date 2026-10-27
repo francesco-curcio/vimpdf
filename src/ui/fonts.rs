@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
 
-const FONT_KEY: &str = "pdfv-ui";
+const FONT_KEY: &str = "vimpdf-ui";
 
 fn font_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![

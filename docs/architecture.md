@@ -1,6 +1,6 @@
 # Architecture
 
-How pdfv is put together, for whoever changes it next.
+How vimpdf is put together, for whoever changes it next.
 
 ## Big picture
 
@@ -18,7 +18,7 @@ How pdfv is put together, for whoever changes it next.
 
 Every user action is a `Command` (src/input/command.rs), whichever input
 produced it. Key bindings, `:` commands, mouse gestures and buttons all end
-in `PdfvApp::execute`. That keeps bindings configurable and the logic
+in `VimpdfApp::execute`. That keeps bindings configurable and the logic
 testable without a window.
 
 ## Threads
@@ -73,7 +73,7 @@ stretched old tiles cover the gap. The texture cache is an LRU bounded at
 
 egui's own keyboard focus is released every frame unless a text field is
 being edited (`ctx.text_edit_focused()`), so Tab/Enter/Space never activate
-an egui widget behind pdfv's back; clickable labels use `Sense::CLICK`
+an egui widget behind vimpdf's back; clickable labels use `Sense::CLICK`
 (not focusable).
 
 - `input/mod.rs` turns egui events into vim tokens: printable characters from
@@ -149,7 +149,7 @@ creation and its start. There `platform::install_open_handler` adds an
 `class_addMethod` (winit 0.30 registers its own delegate and aborts if it is
 replaced). Opened paths are queued; a file opened while launching is already
 queued when eframe creates the app, later ones are picked up each frame.
-Without a document pdfv opens `welcome.rs`'s generated one-page PDF.
+Without a document vimpdf opens `welcome.rs`'s generated one-page PDF.
 `scripts/bundle-macos.sh` builds the `.app` with an `Info.plist` declaring
 `com.adobe.pdf` as a viewable document type.
 
@@ -166,7 +166,7 @@ changed pages' *generation* is bumped. The generation is part of the tile key,
 so old tiles of those pages remain the fallback until the new ones arrive (no
 flash), and other pages' tiles stay valid. `:w` saves into the original file
 incrementally (append-only); the file's size and time are remembered so the
-watcher doesn't reload pdfv's own save. Redaction marks are `Redact` annotations. Applying them
+watcher doesn't reload vimpdf's own save. Redaction marks are `Redact` annotations. Applying them
 (`EditorState::apply_redactions`) saves the current state to a scratch file,
 opens that as a separate document, runs MuPDF's page redaction with black
 boxes, pixel blanking for images, removal of covered line art and text
@@ -201,7 +201,7 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | File | Role |
 | --- | --- |
 | `main.rs` | CLI, logging, config load, window options |
-| `app.rs` | `PdfvApp`: frame loop, command execution, screen split |
+| `app.rs` | `VimpdfApp`: frame loop, command execution, screen split |
 | `view.rs` | `DocView`: one open document (layout, renderer, textures, links) |
 | `document.rs` | MuPDF wrapper: page sizes, links, `PageRenderer` |
 | `layout.rs` | Page rectangles in document space |
@@ -233,5 +233,5 @@ collected as warnings, never fatal. Key overrides are applied on top of
 
 `cargo test` runs the unit tests (layout, viewport, keymap, counts, commands,
 config, tiles, queue, cache, history…). Tests that need a real PDF are
-`#[ignore]`d and read the path from `PDFV_TEST_PDF`; one of them checks that a
+`#[ignore]`d and read the path from `VIMPDF_TEST_PDF`; one of them checks that a
 rendered tile is pixel-identical to the same region of a whole-page render.

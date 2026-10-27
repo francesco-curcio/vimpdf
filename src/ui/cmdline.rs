@@ -66,7 +66,7 @@ impl CmdLine {
     pub fn show(&mut self, ui: &mut egui::Ui, rect: Rect, font_size: f32) -> Outcome {
         ui.painter().rect_filled(rect, 0.0, BAR_BACKGROUND);
         let font = FontId::monospace(font_size);
-        let id = Id::unique(("pdfv-cmdline", self.prompt));
+        let id = Id::unique(("vimpdf-cmdline", self.prompt));
         let was_empty = self.text.is_empty();
         let (enter, escape, backspace, up, down) = ui.input(|i| {
             (

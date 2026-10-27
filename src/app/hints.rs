@@ -37,7 +37,7 @@ pub(super) struct HintState {
 /// (page, x, y, target) of every candidate, in reading order.
 type Candidates = Vec<(usize, f32, f32, Target)>;
 
-impl PdfvApp {
+impl VimpdfApp {
     /// Label every link on screen (`f`, `yf`).
     pub(super) fn start_hints(&mut self, action: HintAction) {
         let Some(vp) = &self.viewport else { return };

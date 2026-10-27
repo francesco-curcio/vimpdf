@@ -31,7 +31,7 @@ pub fn show(
     let font = FontId::proportional(font_size);
     let small = FontId::proportional((font_size - 2.0).max(9.0));
     let mut clicked = None;
-    egui::Area::new(Id::unique("pdfv-annotations"))
+    egui::Area::new(Id::unique("vimpdf-annotations"))
         .order(egui::Order::Foreground)
         .fixed_pos(rect.min)
         .show(ctx, |ui| {

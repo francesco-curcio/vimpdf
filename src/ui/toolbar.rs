@@ -42,7 +42,7 @@ impl Toolbar {
         }
         bar.separator();
 
-        let id = Id::unique("pdfv-toolbar-page");
+        let id = Id::unique("vimpdf-toolbar-page");
         let focused = bar.memory(|m| m.has_focus(id));
         if !focused {
             self.page_text = page.to_string();

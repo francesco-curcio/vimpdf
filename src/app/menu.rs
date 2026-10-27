@@ -9,7 +9,7 @@ use crate::ui::menubar::{self, Item, Menu, MenuAction};
 
 const RECENT_FILES: usize = 10;
 
-impl PdfvApp {
+impl VimpdfApp {
     /// The key shown next to a menu entry: the current binding (normal or
     /// visual mode), or a fallback such as a `:` command.
     fn key_label(&self, cmd: &Command, fallback: &str) -> String {
@@ -327,7 +327,7 @@ impl PdfvApp {
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                Grid::new("pdfv-props").striped(true).show(ui, |ui| {
+                Grid::new("vimpdf-props").striped(true).show(ui, |ui| {
                     for (k, v) in &rows {
                         ui.label(RichText::new(k).font(font.clone()).color(ui::BAR_DIM));
                         ui.label(RichText::new(v).font(font.clone()));

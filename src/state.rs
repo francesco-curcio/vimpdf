@@ -1,5 +1,5 @@
 //! Per-file state remembered between sessions: position, zoom, fit mode and
-//! marks. Stored in `$XDG_STATE_HOME/pdfv/` (default `~/.local/state/pdfv/`),
+//! marks. Stored in `$XDG_STATE_HOME/vimpdf/` (default `~/.local/state/vimpdf/`),
 //! one small TOML file per document, named after a hash of its path.
 
 use std::path::{Path, PathBuf};
@@ -25,7 +25,7 @@ pub fn state_dir() -> Option<PathBuf> {
         .or_else(|| {
             directories::BaseDirs::new().map(|d| d.home_dir().join(".local").join("state"))
         })?;
-    Some(base.join("pdfv"))
+    Some(base.join("vimpdf"))
 }
 
 /// FNV-1a: stable across Rust versions (unlike `DefaultHasher`), so state
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn round_trips_through_a_file() {
-        let dir = std::env::temp_dir().join(format!("pdfv-state-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vimpdf-state-test-{}", std::process::id()));
         let doc = Path::new("/papers/attention.pdf");
         assert_eq!(load(&dir, doc), None);
 
