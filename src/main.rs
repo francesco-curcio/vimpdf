@@ -6,6 +6,8 @@ mod layout;
 mod links;
 mod modes;
 mod render;
+mod search;
+mod text;
 mod ui;
 mod view;
 mod viewport;

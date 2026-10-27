@@ -102,6 +102,9 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `zoom_in [n]`, `zoom_out [n]`, `zoom_reset` | `+`, `-`, `=` |
 | `fit_width`, `fit_page` | `s`, `a` |
 | `command_line [text]` | `:` |
+| `search_prompt [text]` | `/` |
+| `search <text>` | — (`:search foo` searches without opening the prompt) |
+| `search_next [n]`, `search_prev [n]` | `n`, `N` |
 | `toggle_toolbar`, `toggle_statusbar` | `<C-t>`, — |
 | `toggle_help` | `?` |
 | `toggle_fullscreen` | `<C-F>` |

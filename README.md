@@ -7,7 +7,7 @@ and UI use [egui/eframe](https://github.com/emilk/egui).
 
 Status: in development — see [PLAN.md](PLAN.md) for the roadmap. Done so far:
 continuous scrolling, vim motions with counts, links, zoom and fit modes,
-status bar, `:` command line, config file, toolbar, help overlay.
+status bar, `:` command line, config file, toolbar, help overlay, search.
 
 Documentation:
 
@@ -64,12 +64,14 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `=` | Zoom to 100% |
 | `s` | Fit width (kept when the window is resized) |
 | `a` | Fit page (kept when the window is resized; `J`/`K` keep pages centred) |
+| `/` | Search (Enter runs it; an empty search repeats the last one) |
+| `n` / `N` | Next / previous match (wraps; `3n` skips ahead) |
 | `:` | Command line |
 | `?` | Help overlay: active keys, mouse actions, commands |
 | `<C-t>` | Toggle the toolbar |
 | `<C-F>` | Toggle fullscreen |
 | `r` | Reload the document, keeping the position |
-| `Esc` | Cancel a pending count/key sequence, clear the message, close help |
+| `Esc` | Cancel a pending count/key sequence, clear the message and search highlights, close help |
 | `q` | Quit |
 
 ### Mouse and trackpad
@@ -103,10 +105,27 @@ cancels; Up / Down browse the history.
 | `:q` | Quit |
 | `:<command> [args]` | Any bindable command, e.g. `:zoom_in 3`, `:fit_page` |
 
+### Search
+
+`/` opens the search line at the bottom. The search runs in the background
+from the current page to the end and then wraps around, so the first hit shows
+up straight away even in long documents; the view jumps to the first match
+below the current position.
+
+- Case-insensitive, unless the query contains a capital letter (smart case).
+- Whitespace in the query matches any whitespace, including line breaks, and
+  words hyphenated across a line break are found whole (`multileptonic`
+  matches `multi-` / `leptonic`).
+- All matches on screen are highlighted, the current one more strongly.
+  `n` / `N` move between them; `Esc` hides the highlights until the next `n`.
+- The status bar shows `[match/total]`, with `searching…` while it runs.
+- Up / Down in the search line browse previous searches.
+
 ### Status bar
 
 From left to right: mode, file name (or the latest message — errors in red),
-then on the right the keys typed so far (e.g. `12g`), `page/total` and the zoom.
+then on the right the search position (`[3/27]`), the keys typed so far
+(e.g. `12g`), `page/total` and the zoom.
 The page shown is the one at the centre of the window.
 
 ## Configuration

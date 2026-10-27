@@ -43,6 +43,13 @@ pub enum Command {
     FollowLink(LinkTarget),
     /// Open the `:` command line, optionally prefilled.
     EnterCommandLine(String),
+    /// Open the `/` search line, optionally prefilled.
+    EnterSearch(String),
+    /// Search for text; an empty query repeats the last search.
+    Search(String),
+    /// Go to the `n`th next / previous search match.
+    SearchNext(u32),
+    SearchPrev(u32),
     ToggleStatusbar,
     ToggleToolbar,
     ToggleHelp,
@@ -77,6 +84,8 @@ const COUNTED: &[(&str, MakeCounted)] = &[
     ("prev_page", Command::PrevPage),
     ("zoom_in", Command::ZoomIn),
     ("zoom_out", Command::ZoomOut),
+    ("search_next", Command::SearchNext),
+    ("search_prev", Command::SearchPrev),
 ];
 
 /// Commands without arguments, by config name.
@@ -113,6 +122,8 @@ impl Command {
             PrevPage(k) => PrevPage(k * n),
             ZoomIn(k) => ZoomIn(k * n),
             ZoomOut(k) => ZoomOut(k * n),
+            SearchNext(k) => SearchNext(k * n),
+            SearchPrev(k) => SearchPrev(k * n),
             GotoFirst | GotoLast | GotoPage(_) => GotoPage(n as usize),
             other => other,
         }
@@ -148,6 +159,8 @@ impl Command {
                 .map(Command::GotoPage)
                 .map_err(|_| format!("'goto_page' takes a page number, got '{a}'")),
             ("command_line", a) => Ok(Command::EnterCommandLine(a.unwrap_or("").to_owned())),
+            ("search_prompt", a) => Ok(Command::EnterSearch(a.unwrap_or("").to_owned())),
+            ("search", a) => Ok(Command::Search(a.unwrap_or("").to_owned())),
             ("open", Some(a)) => Ok(Command::Open(expand_tilde(a))),
             ("", _) => Err("empty command".into()),
             _ => Err(format!("unknown command '{s}'")),
@@ -174,6 +187,9 @@ impl Command {
             Command::GotoPage(n) => format!("goto_page {n}"),
             Command::EnterCommandLine(s) if s.is_empty() => "command_line".into(),
             Command::EnterCommandLine(s) => format!("command_line {s}"),
+            Command::EnterSearch(s) if s.is_empty() => "search_prompt".into(),
+            Command::EnterSearch(s) => format!("search_prompt {s}"),
+            Command::Search(s) => format!("search {s}"),
             Command::Open(p) => format!("open {}", p.display()),
             other => format!("{other:?}"),
         }
@@ -184,7 +200,7 @@ impl Command {
         match self {
             ScrollDown(n) | ScrollUp(n) | ScrollLeft(n) | ScrollRight(n) | HalfPageDown(n)
             | HalfPageUp(n) | ScreenDown(n) | ScreenUp(n) | NextPage(n) | PrevPage(n)
-            | ZoomIn(n) | ZoomOut(n) => Some(*n),
+            | ZoomIn(n) | ZoomOut(n) | SearchNext(n) | SearchPrev(n) => Some(*n),
             _ => None,
         }
     }
@@ -283,6 +299,8 @@ mod tests {
             "goto_first",
             "goto_page 4",
             "toggle_help",
+            "search_prompt",
+            "search_next 2",
             "command_line",
             "quit",
         ] {
@@ -303,6 +321,10 @@ mod tests {
         );
         assert!(parse_ex("open").is_err());
         assert_eq!(parse_ex("zoom_in 2"), Ok(Some(Command::ZoomIn(2))));
+        assert_eq!(
+            parse_ex("search Standard Model"),
+            Ok(Some(Command::Search("Standard Model".into())))
+        );
         assert!(parse_ex("frobnicate").is_err());
     }
 

@@ -4,9 +4,12 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use mupdf::{Colorspace, DestinationKind, Device, DisplayList, Document, Matrix, Pixmap, Rect};
+use mupdf::{
+    Colorspace, DestinationKind, Device, DisplayList, Document, Matrix, Pixmap, Rect, TextPageFlags,
+};
 
 use crate::links::{LinkTarget, PageLink};
+use crate::text::{PageText, TextChar};
 
 /// Page size in PDF points, plus the origin of the page's bounds in MuPDF
 /// page space (usually 0,0; link and text coordinates are relative to it).
@@ -122,6 +125,44 @@ fn page_links(doc: &Document, page: i32, sizes: &[PageSize]) -> Result<Vec<PageL
             y1: b.y1 - size.origin_y,
             target,
         });
+    }
+    Ok(out)
+}
+
+/// The text of a page, in page-relative coordinates.
+pub fn page_text(doc: &Document, page: usize) -> Result<PageText> {
+    let p = doc
+        .load_page(page as i32)
+        .with_context(|| format!("cannot load page {}", page + 1))?;
+    let bounds = p.bounds()?;
+    let stext = p.to_text_page(TextPageFlags::empty())?;
+    let mut out = PageText::default();
+    for block in stext.blocks() {
+        let first_line = out.lines.len();
+        for line in block.lines() {
+            let start = out.chars.len();
+            for ch in line.chars() {
+                let Some(c) = ch.char() else { continue };
+                let q = ch.quad();
+                let xs = [q.ul.x, q.ur.x, q.ll.x, q.lr.x];
+                let ys = [q.ul.y, q.ur.y, q.ll.y, q.lr.y];
+                let min = |v: [f32; 4]| v.into_iter().fold(f32::INFINITY, f32::min);
+                let max = |v: [f32; 4]| v.into_iter().fold(f32::NEG_INFINITY, f32::max);
+                out.chars.push(TextChar {
+                    c,
+                    x0: min(xs) - bounds.x0,
+                    y0: min(ys) - bounds.y0,
+                    x1: max(xs) - bounds.x0,
+                    y1: max(ys) - bounds.y0,
+                });
+            }
+            if out.chars.len() > start {
+                out.lines.push(start..out.chars.len());
+            }
+        }
+        if out.lines.len() > first_line {
+            out.blocks.push(first_line..out.lines.len());
+        }
     }
     Ok(out)
 }
@@ -303,6 +344,20 @@ mod tests {
 
         let links = load_all_links(path).unwrap();
         assert_eq!(links.len(), info.page_count());
+
+        // Text extraction finds words on the first page, inside the page.
+        let doc = open(path).unwrap();
+        let text = page_text(&doc, 0).unwrap();
+        assert!(!text.chars.is_empty());
+        let size = info.page_sizes[0];
+        assert!(
+            text.chars
+                .iter()
+                .all(|c| c.x0 >= -1.0 && c.y1 <= size.height + 1.0)
+        );
+        if let Ok(word) = std::env::var("PDFV_TEST_WORD") {
+            assert!(!text.find(&word, false).is_empty(), "'{word}' not found");
+        }
 
         if let Ok(out) = std::env::var("PDFV_DUMP") {
             let mut ppm = format!("P6\n{} {}\n255\n", page.width, page.height).into_bytes();

@@ -31,6 +31,10 @@ testable without a window.
   once for all of its tiles. Results go back over a crossbeam channel, already
   converted to `egui::ColorImage`, and the worker wakes the UI.
 - **Link loader** (`links.rs`): reads every page's links once at open time.
+- **Search worker** (`search.rs`): its own `Document`; scans pages from the
+  current one and wraps, streaming matches per page so the first hit can be
+  shown at once. Page text is cached, so repeat searches take milliseconds.
+  A newer request cancels the running one between pages.
 
 The render queue is a priority list the UI replaces wholesale whenever the
 wanted set changes (`Renderer::set_queue`), so jobs for pages that scrolled
@@ -77,6 +81,16 @@ stretched old tiles cover the gap. The texture cache is an LRU bounded at
   `ui::cmdline::type_ahead` (Enter submits, Esc cancels), so fast typing like
   `:12⏎` never loses characters.
 
+## Text and search
+
+`document::page_text` turns MuPDF's structured text into `text::PageText`:
+characters with page-relative boxes, grouped into lines and blocks in MuPDF's
+reading order. `PageText::find` searches a normalised copy (whitespace runs
+collapsed, lines joined with a space, words hyphenated at a line end joined
+back, optional case folding) and maps matches back to character indices;
+`PageText::rects` gives one rectangle per line of a match. The UI keeps
+results in `search::SearchState` (per document) for `n`/`N` and highlighting.
+
 ## Config
 
 `config.rs`: every option goes through `Config::set(key, toml::Value)`, used
@@ -97,6 +111,8 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `render/` | Worker pool + queue, tile planning, LRU cache |
 | `input/` | Commands, key notation, counts, mouse |
 | `links.rs` | Link types, loader thread, safe external opening |
+| `text.rs` | Page text model, matching, match rectangles |
+| `search.rs` | Search worker and result state |
 | `config.rs` | Options, TOML loading, `:set` |
 | `modes.rs` | Input modes |
 | `ui/` | Status bar, command line, toolbar, help overlay, font lookup |

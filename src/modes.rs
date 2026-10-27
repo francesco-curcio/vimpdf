@@ -4,6 +4,8 @@ pub enum Mode {
     Normal,
     /// Typing in the `:` command line.
     Command,
+    /// Typing a `/` search.
+    Search,
 }
 
 impl Mode {
@@ -11,6 +13,7 @@ impl Mode {
         match self {
             Mode::Normal => "NORMAL",
             Mode::Command => "COMMAND",
+            Mode::Search => "SEARCH",
         }
     }
 }

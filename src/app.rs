@@ -11,6 +11,8 @@ use crate::input::{key_tokens, mouse};
 use crate::links::{self, LinkTarget};
 use crate::modes::Mode;
 use crate::render::ScaleKey;
+use crate::search::{MatchId, SearchEvent, SearchRequest};
+use crate::text;
 use crate::ui::cmdline::{CmdLine, Outcome, TypeAhead, type_ahead};
 use crate::ui::toolbar::{self, Toolbar};
 use crate::ui::{self, fonts, help, statusbar};
@@ -40,6 +42,7 @@ pub struct PdfvApp {
     keys: KeyState,
     mode: Mode,
     cmdline: CmdLine,
+    searchline: CmdLine,
     toolbar: Toolbar,
     show_help: bool,
     message: Option<Message>,
@@ -75,7 +78,8 @@ impl PdfvApp {
             keymap,
             keys: KeyState::default(),
             mode: Mode::Normal,
-            cmdline: CmdLine::default(),
+            cmdline: CmdLine::new(':'),
+            searchline: CmdLine::new('/'),
             toolbar: Toolbar::default(),
             show_help: false,
             message: None,
@@ -296,6 +300,18 @@ impl PdfvApp {
                 self.mode = Mode::Command;
                 self.cmdline.open(&prefill);
             }
+            Command::EnterSearch(prefill) => {
+                self.keys.reset();
+                self.mode = Mode::Search;
+                self.searchline.open(&prefill);
+            }
+            Command::Search(query) => {
+                let page = vp.current_page(layout);
+                let origin_y = vp.y - layout.page(page).y;
+                self.start_search(query, page, origin_y);
+            }
+            Command::SearchNext(n) => self.search_step(n as usize, true),
+            Command::SearchPrev(n) => self.search_step(n as usize, false),
             Command::ToggleStatusbar => self.config.statusbar = !self.config.statusbar,
             Command::ToggleToolbar => self.config.toolbar = !self.config.toolbar,
             Command::ToggleHelp => self.show_help = !self.show_help,
@@ -321,6 +337,7 @@ impl PdfvApp {
             Command::Cancel => {
                 self.message = None;
                 self.show_help = false;
+                self.view.search.highlight = false;
             }
             Command::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
             Command::ScrollDown(_)
@@ -331,6 +348,126 @@ impl PdfvApp {
             | Command::HalfPageUp(_)
             | Command::ScreenDown(_)
             | Command::ScreenUp(_) => unreachable!("handled above"),
+        }
+    }
+
+    fn start_search(&mut self, query: String, page: usize, origin_y: f32) {
+        let query = if query.trim().is_empty() {
+            self.view.search.query.clone()
+        } else {
+            query
+        };
+        if query.trim().is_empty() {
+            return self.error("No previous search");
+        }
+        let search = &mut self.view.search;
+        search.start(query.clone(), page, origin_y);
+        self.view.searcher.request(SearchRequest {
+            id: search.id,
+            case_sensitive: text::is_case_sensitive(&query),
+            query,
+            start_page: page,
+            page_count: self.view.page_count(),
+        });
+    }
+
+    fn search_step(&mut self, n: usize, forward: bool) {
+        let search = &mut self.view.search;
+        match search.step(n, forward) {
+            Some(m) => self.show_match(m),
+            None if search.running => self.info("Still searching…"),
+            None if search.query.is_empty() => self.error("No previous search"),
+            None => {
+                let q = search.query.clone();
+                self.error(format!("Pattern not found: {q}"));
+            }
+        }
+    }
+
+    /// Handle search results from the worker; jump to the first match.
+    fn receive_search(&mut self) {
+        while let Some(event) = self.view.searcher.try_recv() {
+            let search = &mut self.view.search;
+            match event {
+                SearchEvent::Matches { id, page, matches } if id == search.id => {
+                    if let Some(m) = search.add(page, matches) {
+                        self.show_match(m);
+                    }
+                }
+                SearchEvent::Done { id } if id == search.id => {
+                    if let Some(m) = search.finish() {
+                        self.show_match(m);
+                    } else if search.total() == 0 {
+                        let q = search.query.clone();
+                        self.error(format!("Pattern not found: {q}"));
+                    }
+                }
+                _ => {} // results of an older search
+            }
+        }
+    }
+
+    /// Scroll so a search match is visible, a third of the way down.
+    fn show_match(&mut self, m: MatchId) {
+        let Some(vp) = self.viewport.as_mut() else {
+            return;
+        };
+        let Some(rects) = self.view.search.rects(m) else {
+            return;
+        };
+        let Some(first) = rects.first() else { return };
+        let page = self.view.layout.page(m.0);
+        let (x0, y0) = (page.x + first.x0, page.y + first.y0);
+        let (x1, y1) = (page.x + first.x1, page.y + first.y1);
+        if y0 < vp.y || y1 > vp.y + vp.doc_height() {
+            vp.y = y0 - vp.doc_height() / 3.0;
+        }
+        if x0 < vp.x || x1 > vp.x + vp.doc_width() {
+            vp.x = (x0 + x1) / 2.0 - vp.doc_width() / 2.0;
+        }
+        self.pending_scroll = Vec2::ZERO;
+    }
+
+    fn draw_search_highlights(&self, painter: &egui::Painter, area: Rect, vp: &Viewport) {
+        let search = &self.view.search;
+        if !search.highlight || search.results.is_empty() {
+            return;
+        }
+        let fill = color32(self.config.colors.search_highlight);
+        let [r, g, b, _] = self.config.colors.hint_background.0;
+        let current_fill = Color32::from_rgba_unmultiplied(r, g, b, 150);
+        let layout = &self.view.layout;
+        for page in layout.pages_in(vp.y, vp.y + vp.doc_height()) {
+            let Some(matches) = search.results.get(&page) else {
+                continue;
+            };
+            let p = layout.page(page);
+            for (i, rects) in matches.iter().enumerate() {
+                let current = search.current == Some((page, i));
+                for t in rects {
+                    let (ax, ay) = vp.to_view(p.x + t.x0, p.y + t.y0);
+                    let (bx, by) = vp.to_view(p.x + t.x1, p.y + t.y1);
+                    let rect = Rect::from_min_max(
+                        area.min + Vec2::new(ax, ay),
+                        area.min + Vec2::new(bx, by),
+                    )
+                    .expand(1.0);
+                    painter.rect_filled(rect, 2.0, if current { current_fill } else { fill });
+                }
+            }
+        }
+    }
+
+    fn search_status(&self) -> String {
+        let s = &self.view.search;
+        if s.query.is_empty() {
+            return String::new();
+        }
+        match (s.position(), s.running) {
+            (Some(i), true) => format!("[{i}/{}+ searching…]", s.total()),
+            (Some(i), false) => format!("[{i}/{}]", s.total()),
+            (None, true) => "[searching…]".into(),
+            (None, false) => String::new(),
         }
     }
 
@@ -353,15 +490,27 @@ impl PdfvApp {
             let Some(cmd) = self.keys.feed(&tok, &self.keymap) else {
                 continue;
             };
-            let Command::EnterCommandLine(prefill) = cmd else {
-                commands.push(cmd);
-                continue;
+            let (prefill, search) = match cmd {
+                Command::EnterCommandLine(p) => (p, false),
+                Command::EnterSearch(p) => (p, true),
+                other => {
+                    commands.push(other);
+                    continue;
+                }
             };
-            // Keys typed in the same frame as ':' belong to the command line.
+            // Keys typed in the same frame as ':' or '/' belong to that line.
             match type_ahead(&mut tokens, prefill) {
+                TypeAhead::Editing(text) if search => {
+                    commands.push(Command::EnterSearch(text));
+                    break;
+                }
                 TypeAhead::Editing(text) => {
                     commands.push(Command::EnterCommandLine(text));
                     break;
+                }
+                TypeAhead::Submitted(line) if search => {
+                    self.searchline.push_history(&line);
+                    commands.push(Command::Search(line));
                 }
                 TypeAhead::Submitted(line) => {
                     self.cmdline.push_history(&line);
@@ -401,7 +550,7 @@ impl eframe::App for PdfvApp {
             area.min.y += h;
             r
         });
-        let bottom_rect = (self.config.statusbar || self.mode == Mode::Command).then(|| {
+        let bottom_rect = (self.config.statusbar || self.mode != Mode::Normal).then(|| {
             let h = ui::bar_height(font_size);
             area.max.y -= h;
             Rect::from_min_size(area.left_bottom(), Vec2::new(area.width(), h))
@@ -457,6 +606,12 @@ impl eframe::App for PdfvApp {
         }
 
         // Pages.
+        self.receive_search();
+        let Some(vp) = self.viewport.as_mut() else {
+            return;
+        };
+        vp.clamp(&self.view.layout);
+        let vp = vp.clone();
         self.view.receive_results(&ctx);
         let scale = ScaleKey::from_scale(vp.zoom * ctx.pixels_per_point());
         self.view.schedule(&ctx, &vp, scale, self.scrolling_up);
@@ -464,6 +619,7 @@ impl eframe::App for PdfvApp {
         painter.rect_filled(area, 0.0, BACKGROUND);
         let page_color = color32(self.config.colors.page_background);
         self.view.draw(&painter, area, &vp, scale, page_color);
+        self.draw_search_highlights(&painter, area, &vp);
 
         // Bars and overlays.
         if self
@@ -496,6 +652,14 @@ impl eframe::App for PdfvApp {
                     }
                 }
             },
+            (Some(rect), Mode::Search) => match self.searchline.show(ui, rect, font_size) {
+                Outcome::Editing => {}
+                Outcome::Cancel => self.mode = Mode::Normal,
+                Outcome::Submit(line) => {
+                    self.mode = Mode::Normal;
+                    ui_commands.push(Command::Search(line));
+                }
+            },
             (Some(rect), Mode::Normal) => {
                 let file = self.view.file_name();
                 let status = statusbar::Status {
@@ -505,6 +669,7 @@ impl eframe::App for PdfvApp {
                     pages,
                     zoom_percent: vp.zoom * 100.0,
                     pending: self.keys.pending_display(),
+                    search: self.search_status(),
                     message: self.message.as_ref().map(|m| (m.text.as_str(), m.error)),
                     font_size,
                 };

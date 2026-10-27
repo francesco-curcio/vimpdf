@@ -14,6 +14,8 @@ pub struct Status<'a> {
     pub zoom_percent: f32,
     /// Count / partial key sequence being typed.
     pub pending: String,
+    /// Search position, e.g. "[3/27]", "[searching…]".
+    pub search: String,
     /// Transient message, and whether it's an error.
     pub message: Option<(&'a str, bool)>,
     pub font_size: f32,
@@ -42,6 +44,9 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, s: &Status) -> Option<Command> {
         .on_hover_text("Go to page (:)");
     if page.clicked() {
         command = Some(Command::EnterCommandLine(String::new()));
+    }
+    if !s.search.is_empty() {
+        bar.label(RichText::new(&s.search).font(font.clone()).color(BAR_DIM));
     }
     if !s.pending.is_empty() {
         bar.label(RichText::new(&s.pending).font(font.clone()).color(ACCENT));

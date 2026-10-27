@@ -17,6 +17,7 @@ use crate::links::{self, PageLink};
 use crate::render::cache::LruCache;
 use crate::render::tiles;
 use crate::render::{RenderJob, Renderer, ScaleKey};
+use crate::search::{SearchState, Searcher};
 use crate::viewport::Viewport;
 
 const PLACEHOLDER_TEXT: Color32 = Color32::from_gray(160);
@@ -38,6 +39,8 @@ pub struct DocView {
     scale: Option<(ScaleKey, Instant)>,
     pub links: Vec<Vec<PageLink>>,
     links_rx: Receiver<Vec<Vec<PageLink>>>,
+    pub searcher: Searcher,
+    pub search: SearchState,
 }
 
 impl DocView {
@@ -59,6 +62,8 @@ impl DocView {
         let renderer = Renderer::spawn(path.clone(), workers, move || wake.request_repaint());
         let wake = ctx.clone();
         let links_rx = links::spawn_loader(path.clone(), move || wake.request_repaint());
+        let wake = ctx.clone();
+        let searcher = Searcher::spawn(path.clone(), move || wake.request_repaint());
 
         Self {
             layout: Layout::new(&info.page_sizes, PAGE_GAP),
@@ -70,6 +75,8 @@ impl DocView {
             last_queue: Vec::new(),
             scale: None,
             links_rx,
+            searcher,
+            search: SearchState::default(),
         }
     }
 

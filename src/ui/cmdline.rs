@@ -6,9 +6,10 @@ use super::{ACCENT, BAR_BACKGROUND, BAR_TEXT};
 
 const HISTORY_LIMIT: usize = 200;
 
-/// The `:` command line: text being typed and history.
-#[derive(Default)]
+/// A one-line prompt (`:` command line or `/` search): text being typed
+/// and history.
 pub struct CmdLine {
+    prompt: char,
     pub text: String,
     history: Vec<String>,
     /// Position while browsing history with Up/Down.
@@ -23,6 +24,16 @@ pub enum Outcome {
 }
 
 impl CmdLine {
+    pub fn new(prompt: char) -> Self {
+        Self {
+            prompt,
+            text: String::new(),
+            history: Vec::new(),
+            browsing: None,
+            needs_focus: false,
+        }
+    }
+
     pub fn open(&mut self, prefill: &str) {
         self.text = prefill.to_owned();
         self.browsing = None;
@@ -55,7 +66,7 @@ impl CmdLine {
     pub fn show(&mut self, ui: &mut egui::Ui, rect: Rect, font_size: f32) -> Outcome {
         ui.painter().rect_filled(rect, 0.0, BAR_BACKGROUND);
         let font = FontId::monospace(font_size);
-        let id = Id::unique("pdfv-cmdline");
+        let id = Id::unique(("pdfv-cmdline", self.prompt));
         let was_empty = self.text.is_empty();
         let (enter, escape, backspace, up, down) = ui.input(|i| {
             (
@@ -73,7 +84,11 @@ impl CmdLine {
                 .layout(Layout::left_to_right(Align::Center)),
         );
         line.spacing_mut().item_spacing.x = 0.0;
-        line.label(RichText::new(":").font(font.clone()).color(ACCENT));
+        line.label(
+            RichText::new(self.prompt.to_string())
+                .font(font.clone())
+                .color(ACCENT),
+        );
         let response = line.add(
             TextEdit::singleline(&mut self.text)
                 .id(id)
@@ -185,7 +200,7 @@ mod tests {
 
     #[test]
     fn history_browsing() {
-        let mut c = CmdLine::default();
+        let mut c = CmdLine::new(':');
         assert_eq!(c.browse(true), None);
         c.push_history("set toolbar");
         c.push_history("12");
