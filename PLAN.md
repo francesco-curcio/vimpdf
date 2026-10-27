@@ -392,7 +392,7 @@ viewers (Preview, Acrobat, Zotero) show them too.
 - Comments: `c` in visual mode highlights and opens a comment editor (multi-line;
   Enter saves, Shift+Enter starts a new line, `Esc` cancels — modifier
   shortcuts don't reliably reach a focused text field on macOS, and Cmd+Enter
-  is the user's global terminal shortcut). Highlights with a comment get a
+  is often taken by global shortcuts). Highlights with a comment get a
   small marker; hovering shows the comment.
 - Annotations panel (`<C-a>` / `:annotations`): every highlight, comment and
   redaction mark in the document with page, colour, text and comment; `j`/`k`,
@@ -460,7 +460,7 @@ file, never over the original.
 - **Done when:** every menu entry works from the keyboard (menu navigation and
   letters) and with the mouse, and shows the right key, including after
   rebinding a key in the config.
-- **Status:** done. Keyboard: `gm ll p` (View → Fit page), `gm llw`, `gm i` (Document info), `gm llr` (recolor), Edit → Highlight → colour submenu, File → Open recent submenu, Esc; mouse: View → Zoom in. A test checks that rebinding `toggle_recolor` to `R` changes the key shown. Deviation: the default key is `gm` — `<F10>` stays bound but macOS keeps F-keys for itself (Mission Control / media keys) on the user's machine.
+- **Status:** done. Keyboard: `gm ll p` (View → Fit page), `gm llw`, `gm i` (Document info), `gm llr` (recolor), Edit → Highlight → colour submenu, File → Open recent submenu, Esc; mouse: View → Zoom in. A test checks that rebinding `toggle_recolor` to `R` changes the key shown. Deviation: the default key is `gm` — `<F10>` stays bound, but macOS usually keeps the F-keys for itself (Mission Control, media keys).
 
 ### Later ideas (not scheduled)
 
