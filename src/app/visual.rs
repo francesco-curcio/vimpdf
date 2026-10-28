@@ -579,6 +579,15 @@ impl VimpdfApp {
                     }
                     if let Some((page, xref, kind, commented)) = annot {
                         ui.separator();
+                        if item(ui, &format!("Delete {}", kind.name()), "D", true) {
+                            chosen = Some(Command::DeleteAnnot { page, xref });
+                        }
+                        if kind == AnnotKind::Highlight
+                            && commented
+                            && item(ui, "Delete comment (keep highlight)", "", true)
+                        {
+                            chosen = Some(Command::RemoveComment { page, xref });
+                        }
                         let edit = match kind {
                             AnnotKind::Note => "Edit note…",
                             AnnotKind::Text => "Edit text…",
@@ -587,12 +596,6 @@ impl VimpdfApp {
                         };
                         if item(ui, edit, "<C-a> e", true) {
                             chosen = Some(Command::EditComment { page, xref });
-                        }
-                        if kind == AnnotKind::Highlight
-                            && commented
-                            && item(ui, "Remove comment (keep highlight)", "", true)
-                        {
-                            chosen = Some(Command::RemoveComment { page, xref });
                         }
                         if kind.movable()
                             && item(ui, &format!("Move {}", kind.name()), "<C-a> m", true)
@@ -634,9 +637,6 @@ impl VimpdfApp {
                                     }
                                 }
                             });
-                        }
-                        if item(ui, &format!("Delete {}", kind.name()), "<C-a> d", true) {
-                            chosen = Some(Command::DeleteAnnot { page, xref });
                         }
                     }
                     if let Some((page, x, y)) = at {

@@ -241,6 +241,7 @@ impl Keymap {
             ("X", RedactArea),
             ("C", PlaceNote),
             ("T", PlaceText),
+            ("D", DeleteHints),
             ("gm", OpenMenu),
             ("<F10>", OpenMenu),
         ] {

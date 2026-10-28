@@ -1,6 +1,8 @@
-//! Hint mode (`f`, `yf`, `gv`): labels on links or words; typing one acts on it.
+//! Hint mode (`f`, `yf`, `gv`, `D`): labels on links, words or annotations;
+//! typing one acts on it.
 
 use super::*;
+use crate::annotate::AnnotKind;
 use crate::selection::{Selection, TextPos};
 
 /// What a hint label points at.
@@ -9,6 +11,10 @@ enum Target {
     Link(LinkTarget),
     /// A word: its first character.
     Word(TextPos),
+    Annot {
+        page: usize,
+        xref: i32,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -16,6 +22,8 @@ enum Purpose {
     Link(HintAction),
     /// Start visual mode at the chosen word.
     Word,
+    /// Delete the chosen annotation.
+    DeleteAnnot,
 }
 
 struct Hint {
@@ -102,6 +110,40 @@ impl VimpdfApp {
         self.show_hints(Purpose::Word, found);
     }
 
+    /// Label every annotation on screen (`D`); choosing one deletes it.
+    pub(super) fn start_delete_hints(&mut self) {
+        let Some(vp) = &self.viewport else { return };
+        let layout = &self.view.layout;
+        let visible = layout.pages_in(vp.y, vp.y + vp.doc_height());
+        let found: Candidates = self
+            .annots
+            .list
+            .iter()
+            .filter(|a| visible.contains(&a.page) && a.kind != AnnotKind::Other)
+            .filter_map(|a| {
+                let r = layout.page(a.page);
+                let t = a
+                    .rects
+                    .iter()
+                    .find(|t| in_view(vp, r.x + t.x0, r.y + t.y0, r.x + t.x1, r.y + t.y1))?;
+                Some((
+                    a.page,
+                    t.x0,
+                    t.y0,
+                    Target::Annot {
+                        page: a.page,
+                        xref: a.xref,
+                    },
+                ))
+            })
+            .collect();
+        if found.is_empty() {
+            return self.info("No annotations on screen");
+        }
+        self.info("Type the label of the annotation to delete (u undoes, Esc cancels)");
+        self.show_hints(Purpose::DeleteAnnot, found);
+    }
+
     fn show_hints(&mut self, purpose: Purpose, mut found: Candidates) {
         // Reading order: page, then top to bottom, then left to right.
         found.sort_by_key(|(page, x, y, _)| (*page, y.round() as i32, x.round() as i32));
@@ -177,6 +219,7 @@ impl VimpdfApp {
                 self.info(format!("Copied {text}"));
                 None
             }
+            (_, Target::Annot { page, xref }) => Some(Command::DeleteAnnot { page, xref }),
             (_, Target::Word(pos)) => {
                 let x = self.view.doc_text().rect_at(pos).map_or(0.0, |r| r.x0);
                 self.selection = Some(Selection::at(pos, x));

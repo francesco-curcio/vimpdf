@@ -150,12 +150,17 @@ impl VimpdfApp {
         else {
             return self.error("Annotation not found");
         };
-        let what = match a.kind {
-            AnnotKind::Note => "Note",
-            AnnotKind::Text => "Text box",
-            _ => "Comment",
+        let (what, delete) = match a.kind {
+            AnnotKind::Note => ("Note", "Delete note"),
+            AnnotKind::Text => ("Text box", "Delete text box"),
+            _ => ("Comment", "Delete comment"),
         };
-        let editor = CommentEditor::new(format!("{what} (page {})", page + 1), a.contents.clone());
+        let mut editor =
+            CommentEditor::new(format!("{what} (page {})", page + 1), a.contents.clone());
+        // A highlight without a comment has no comment to delete.
+        if matches!(a.kind, AnnotKind::Note | AnnotKind::Text) || !a.contents.is_empty() {
+            editor = editor.with_delete(delete);
+        }
         self.annots.comment = Some((CommentTarget::Existing { page, xref }, editor));
         self.mode = Mode::Comment;
     }
@@ -474,6 +479,26 @@ impl VimpdfApp {
             CommentOutcome::Cancel => {
                 self.annots.comment = None;
                 self.mode = Mode::Normal;
+            }
+            CommentOutcome::Delete => {
+                let (target, _) = self.annots.comment.take().expect("checked above");
+                self.mode = Mode::Normal;
+                let CommentTarget::Existing { page, xref } = target else {
+                    return;
+                };
+                let kind = self
+                    .annots
+                    .list
+                    .iter()
+                    .find(|a| a.page == page && a.xref == xref)
+                    .map(|a| a.kind);
+                match kind {
+                    // A note or text box is its text: delete it all.
+                    Some(AnnotKind::Note | AnnotKind::Text) => self.delete_annot(page, xref),
+                    // A highlight stays; only its comment goes.
+                    Some(_) => self.remove_comment(page, xref),
+                    None => self.error("Annotation not found"),
+                }
             }
             CommentOutcome::Save(text) => {
                 let (target, _) = self.annots.comment.take().expect("checked above");

@@ -146,6 +146,7 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `redact_area` | `X` |
 | `note` | `C` |
 | `text_box` | `T` |
+| `delete_annotation` | `D` |
 | `redact_matches` | — (`:redact-matches`) |
 | `apply_redactions [path]` | — (`:redact`, `:redact <path>`) |
 | `word_hints` | `gv` |

@@ -16,7 +16,7 @@ const MOUSE: &[(&str, &str)] = &[
     ("Alt + drag, middle drag", "pan (h j k l)"),
     (
         "right click",
-        "menu: copy, highlight, comment, add note / text here, edit, move, delete, link",
+        "menu: delete, copy, highlight, comment, add note / text here, edit, move, link",
     ),
     (
         "click a comment bubble, note or text box",

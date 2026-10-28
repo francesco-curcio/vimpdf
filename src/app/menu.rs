@@ -128,6 +128,7 @@ impl VimpdfApp {
                     .enabled(has_sel),
                 self.item("Add stic&ky note", Command::PlaceNote, "C"),
                 self.item("Add text &box", Command::PlaceText, "T"),
+                self.item("De&lete annotation…", Command::DeleteHints, "D"),
                 self.item("Annotatio&ns…", Command::ToggleAnnotations, ":annotations"),
                 Item::Separator,
                 self.item("Mark for &redaction", Command::RedactSelection, "x")

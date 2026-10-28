@@ -146,6 +146,7 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `X` | Mark an area for redaction (see Redaction) |
 | `C` | Add a sticky note (see Highlights, comments, notes and text) |
 | `T` | Add a text box, written on the page |
+| `D` | Delete an annotation: a label appears on each one on screen; type it |
 | `:` | Command line |
 | `gm` | Open the menu bar (File / Edit / View) — see Menus |
 | `?` | Help overlay: active keys, mouse actions, commands. Your scroll keys (`j`/`k`, `<C-d>`/`<C-u>`, `gg`/`G`, counts…) scroll it; `?`, `Esc` or `q` close it |
@@ -323,9 +324,12 @@ other viewers show them too.
   it, `e` edits the comment (or the note's / text box's text), `c<letter>`
   changes the colour, `m` moves a note, text box or redaction mark, `+`/`-`
   change a text box's font size, `d` deletes, `u` undoes, Esc closes.
-- **Deleting a comment:** to keep the highlight, right-click it → Remove
-  comment (or edit the comment and clear it); `d` in the panel, or
-  right-click → Delete, removes the highlight together with its comment.
+- **Deleting:** `D` puts a label on every annotation on screen; type one to
+  delete it. Or right-click an annotation → Delete (the first entry), or `d`
+  in the annotations panel. To delete only a highlight's comment and keep the
+  highlight: right-click → Delete comment, or the Delete comment button in
+  the comment box. Notes and text boxes have a Delete button in their box
+  too. `u` undoes any of these.
 - With the mouse: right-click a selection for Highlight (with each colour)
   and Comment…; right-click an annotation to edit it, remove its comment,
   move it, change its colour or text size, or delete it.

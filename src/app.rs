@@ -546,6 +546,7 @@ impl VimpdfApp {
                 }
             }
             Command::WordHints => self.start_word_hints(),
+            Command::DeleteHints => self.start_delete_hints(),
             Command::CopyText(text) => {
                 ctx.copy_text(text.clone());
                 self.info(format!("Copied {text}"));

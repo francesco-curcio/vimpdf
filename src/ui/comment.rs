@@ -10,12 +10,16 @@ pub enum Outcome {
     Editing,
     Save(String),
     Cancel,
+    /// The Delete button: delete what is being edited.
+    Delete,
 }
 
 pub struct CommentEditor {
     pub text: String,
     title: String,
     needs_focus: bool,
+    /// Label of the Delete button; none for something not created yet.
+    delete: Option<String>,
 }
 
 impl CommentEditor {
@@ -24,7 +28,14 @@ impl CommentEditor {
             text,
             title: title.into(),
             needs_focus: true,
+            delete: None,
         }
+    }
+
+    /// Show a Delete button with this label.
+    pub fn with_delete(mut self, label: impl Into<String>) -> Self {
+        self.delete = Some(label.into());
+        self
     }
 
     /// Enter saves, Shift+Enter starts a new line, Esc cancels. (Modifier
@@ -50,6 +61,7 @@ impl CommentEditor {
         let id = Id::unique("vimpdf-comment-editor");
         let mut save_clicked = false;
         let mut cancel_clicked = false;
+        let mut delete_clicked = false;
         egui::Window::new(self.title.as_str())
             .collapsible(false)
             .resizable(true)
@@ -72,13 +84,22 @@ impl CommentEditor {
                 ui.horizontal(|ui| {
                     save_clicked = ui.button("Save").clicked();
                     cancel_clicked = ui.button("Cancel").clicked();
+                    if let Some(label) = &self.delete {
+                        delete_clicked = ui
+                            .button(
+                                RichText::new(label).color(egui::Color32::from_rgb(224, 49, 49)),
+                            )
+                            .clicked();
+                    }
                     ui.label(
                         RichText::new("Enter saves · Shift+Enter new line · Esc cancels")
                             .color(BAR_DIM),
                     );
                 });
             });
-        if save || save_clicked {
+        if delete_clicked {
+            Outcome::Delete
+        } else if save || save_clicked {
             Outcome::Save(self.text.trim().to_owned())
         } else if cancel || cancel_clicked {
             Outcome::Cancel

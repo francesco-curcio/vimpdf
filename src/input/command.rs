@@ -67,6 +67,8 @@ pub enum Command {
     SearchSelection,
     /// Labels on visible words; typing one starts visual mode there.
     WordHints,
+    /// Labels on the annotations on screen; typing one deletes it (`D`).
+    DeleteHints,
     /// Copy this text (context menu: link address).
     CopyText(String),
     /// Wait for a colour letter, then highlight the selection (`a`).
@@ -222,6 +224,7 @@ const SIMPLE: &[(&str, Command)] = &[
     ("yank", Command::Yank),
     ("search_selection", Command::SearchSelection),
     ("word_hints", Command::WordHints),
+    ("delete_annotation", Command::DeleteHints),
     ("highlight", Command::AwaitHighlight),
     ("comment", Command::Comment),
     ("undo", Command::Undo),
