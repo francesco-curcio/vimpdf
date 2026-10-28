@@ -233,6 +233,7 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `app/reading.rs` | Recolor, outline keys, state save/restore, auto-reload |
 | `ui/outline.rs` | Outline panel |
 | `platform.rs` | Files opened from the system (macOS `application:openURLs:`), temporary-folder checks, the private temp dir |
+| `present.rs` | Present mode: mailbox on Linux where the window's surface supports it (asked with a throwaway surface; the window starts on vsync and switches on its first frame), `VIMPDF_PRESENT_MODE` override |
 | `annotate.rs` | Annotation editor thread: highlights, comments, redaction marks, undo, saving |
 | `app/annotations.rs`, `ui/annotations.rs`, `ui/comment.rs` | Annotations UI |
 | `app/redact.rs` | Redaction marks, applying |

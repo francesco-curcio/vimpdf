@@ -73,6 +73,13 @@ not Wayland (winit doesn't support it there yet); use `:open`. In Firefox, choos
 General → Applications → "Portable Document Format (PDF)" (after
 `--default`, "Use system default" does it).
 
+On Linux vimpdf hands its frames to the desktop in *mailbox* mode where the
+window supports it (Wayland; under X11 the NVIDIA driver doesn't, and vsync
+is used). With vsync, KDE Plasma on NVIDIA sometimes froze the whole desktop
+a few seconds after vimpdf reloaded a file, until vimpdf was closed. To choose
+the mode yourself, set `VIMPDF_PRESENT_MODE` to `vsync`, `mailbox`,
+`immediate` or `novsync` (an unsupported mode stops vimpdf at startup).
+
 The first build compiles MuPDF from source and takes a minute or two.
 
 To run it from anywhere as `vimpdf`:
@@ -460,7 +467,12 @@ command name, and [config.example.toml](config.example.toml) for a starting poin
 
 - Logging: `RUST_LOG=vimpdf=debug vimpdf paper.pdf`. `vimpdf=trace` also logs every
   command, every scroll position and every frame where a page had no render yet.
+  The present mode chosen at startup is logged at `info` ("present mode").
 - Config warnings are listed in full in the log; the status bar shows the first.
+- The desktop freezes while vimpdf is open (Linux): see the mailbox note under
+  [Linux](#linux). If it still happens, switch to a text console (Ctrl+Alt+F3),
+  log in, and close vimpdf (`pkill -x vimpdf`); Ctrl+Alt+F1 or F2 goes back.
+  Please report it with the log and `VIMPDF_PRESENT_MODE` you used.
 
 ## Tests
 

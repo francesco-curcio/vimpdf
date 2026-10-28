@@ -8,6 +8,7 @@ mod layout;
 mod links;
 mod modes;
 mod platform;
+mod present;
 mod render;
 mod search;
 mod selection;
@@ -93,6 +94,7 @@ fn run(args: Args) -> Result<()> {
             .with_inner_size([900.0, 1100.0])
             .with_maximized(config.start_maximised)
             .with_active(true),
+        wgpu_options: eframe::WgpuConfiguration::default().with_surface_config(present::initial()),
         ..Default::default()
     };
 
@@ -118,14 +120,10 @@ fn run(args: Args) -> Result<()> {
             .unwrap_or_default();
         cc.egui_ctx
             .send_viewport_cmd(eframe::egui::ViewportCommand::Title(name));
-        Ok(Box::new(VimpdfApp::new(
-            cc,
-            path,
-            info,
-            config,
-            config_path,
-            warnings,
-        )))
+        let present = present::preferred(cc);
+        Ok(Box::new(
+            VimpdfApp::new(cc, path, info, config, config_path, warnings).with_present(present),
+        ))
     });
     let mut app = eframe::create_native("vimpdf", options, creator, &event_loop);
     event_loop

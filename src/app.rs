@@ -70,6 +70,8 @@ pub struct VimpdfApp {
     /// Direction of the last vertical movement, for prefetching.
     scrolling_up: bool,
     first_frame: bool,
+    /// Present mode to switch to on the first frame (see `present`).
+    present: Option<eframe::SurfaceConfig>,
     jumps: JumpList,
     hints: Option<HintState>,
     visual_keymap: Keymap,
@@ -127,6 +129,7 @@ impl VimpdfApp {
             pending_scroll: Vec2::ZERO,
             scrolling_up: false,
             first_frame: true,
+            present: None,
             jumps: JumpList::default(),
             hints: None,
             visual_keymap,
@@ -147,6 +150,12 @@ impl VimpdfApp {
         app.watch_file(ctx);
         app.report_warnings(warnings);
         app
+    }
+
+    /// Switch to this present mode on the first frame.
+    pub fn with_present(mut self, present: Option<eframe::SurfaceConfig>) -> Self {
+        self.present = present;
+        self
     }
 
     fn info(&mut self, text: impl Into<String>) {
@@ -761,8 +770,11 @@ fn color32(c: Color) -> Color32 {
 }
 
 impl eframe::App for VimpdfApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if let Some(present) = self.present.take() {
+            frame.set_wgpu_surface_config(present);
+        }
         if self.first_frame {
             // Launched from a terminal, the window doesn't always get focus.
             ctx.send_viewport_cmd(ViewportCommand::Focus);

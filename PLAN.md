@@ -37,7 +37,11 @@ unification with egui's fontique), the UI font default (`"monospace"`, via
 fontconfig), private temp files (`$XDG_RUNTIME_DIR` instead of the shared
 `/tmp`), the Wayland app id, and `scripts/install-linux.sh` (desktop entry,
 icon, default PDF viewer). Not available on Linux with winit 0.30: pinch
-zoom, file drop on Wayland; opening a file from outside starts a new window. Not yet checked by a human: the visual appearance (bars, help, outline panel,
+zoom, file drop on Wayland; opening a file from outside starts a new window.
+Desktop freezes on KDE Plasma with NVIDIA (whole screen stuck, back only
+after killing vimpdf, a few seconds after a reload) went away with the
+mailbox present mode, now the default on Linux where supported
+(`present.rs`). Not yet checked by a human: the visual appearance (bars, help, outline panel,
 highlight colours, recolor), pinch-to-zoom on a real trackpad, and choosing
 vimpdf inside Firefox's settings. Known limitations are listed per milestone
 and in the README.
