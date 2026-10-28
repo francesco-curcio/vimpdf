@@ -921,7 +921,15 @@ impl eframe::App for VimpdfApp {
             ui_commands.extend(self.toolbar.show(ui, rect, page, pages, font_size));
         }
         match (bottom_rect, self.mode) {
-            (Some(rect), Mode::Command) => match self.cmdline.show(ui, rect, font_size) {
+            (Some(rect), Mode::Command) => match self.cmdline.show(
+                ui,
+                rect,
+                font_size,
+                Some(&|line: &str| {
+                    let base = self.view.path.parent().unwrap_or(std::path::Path::new("/"));
+                    crate::input::complete::complete(line, base)
+                }),
+            ) {
                 Outcome::Editing => {}
                 Outcome::Cancel => self.mode = self.prompt_return,
                 Outcome::Submit(line) => {
@@ -933,7 +941,7 @@ impl eframe::App for VimpdfApp {
                     }
                 }
             },
-            (Some(rect), Mode::Search) => match self.searchline.show(ui, rect, font_size) {
+            (Some(rect), Mode::Search) => match self.searchline.show(ui, rect, font_size, None) {
                 Outcome::Editing => {}
                 Outcome::Cancel => self.mode = self.prompt_return,
                 Outcome::Submit(line) => {

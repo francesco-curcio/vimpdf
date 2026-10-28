@@ -395,6 +395,48 @@ impl Command {
     }
 }
 
+/// The `:` commands `parse_ex` knows besides command names, for completion.
+pub const EX_COMMANDS: &[&str] = &[
+    "annotated",
+    "annotations",
+    "config",
+    "edit",
+    "edit!",
+    "help",
+    "info",
+    "open",
+    "properties",
+    "quit",
+    "quit!",
+    "redact",
+    "redact-matches",
+    "saveas",
+    "set",
+    "source",
+    "wq",
+    "write",
+    "write!",
+];
+
+/// `:` commands whose argument is a file path.
+pub const PATH_COMMANDS: &[&str] = &[
+    "o", "open", "e", "edit", "w", "write", "w!", "write!", "sav", "saveas", "redact",
+];
+
+/// Every command name usable on the `:` line and in key bindings.
+pub fn command_names() -> Vec<&'static str> {
+    let mut names: Vec<&str> = COUNTED.iter().map(|(n, _)| *n).collect();
+    names.extend(SIMPLE.iter().map(|(n, _)| *n));
+    names.extend([
+        "goto_page",
+        "command_line",
+        "search_prompt",
+        "search",
+        "open",
+    ]);
+    names
+}
+
 /// Parse a `:` command line. `Ok(None)` for an empty line.
 pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
     let line = line.trim().trim_start_matches(':').trim();
@@ -467,6 +509,21 @@ pub fn expand_tilde(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_listed_ex_command_is_known() {
+        // Some need an argument: then a sample one is given.
+        for name in EX_COMMANDS
+            .iter()
+            .chain(PATH_COMMANDS)
+            .chain(&command_names())
+        {
+            let known = |line: &str| {
+                parse_ex(line).map_or_else(|e| !e.starts_with("unknown command"), |_| true)
+            };
+            assert!(known(name) || known(&format!("{name} 1")), "{name}");
+        }
+    }
 
     #[test]
     fn counts_multiply_motions_and_select_pages() {

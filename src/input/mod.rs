@@ -2,6 +2,7 @@
 //! the egui event translation is pure and unit-tested.
 
 pub mod command;
+pub mod complete;
 pub mod counts;
 pub mod keymap;
 pub mod mouse;

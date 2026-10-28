@@ -217,6 +217,13 @@ mouse, click as usual.
 Press `:` and type a command, then Enter. `Esc` (or Backspace on an empty line)
 cancels; Up / Down browse the history.
 
+`Tab` completes, like in a shell: command names, option names after `:set`,
+and file paths after `:open` / `:e`, `:w`, `:saveas` and `:redact` (only
+folders and PDFs; relative paths start from the open document's folder, `~`
+works, hidden files appear once you type a dot). The first `Tab` completes as
+far as all matches agree and lists them above the line; pressing it again
+steps through them, `Shift+Tab` backwards.
+
 | Command | Action |
 | --- | --- |
 | `:<n>` | Go to page n |
