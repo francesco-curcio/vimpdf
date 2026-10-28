@@ -3,6 +3,7 @@
 use eframe::egui::{CursorIcon, PointerButton, Pos2};
 
 use super::*;
+use crate::annotate::AnnotKind;
 use crate::config::{DragMode, Modifier};
 use crate::selection::{self, Motion, Selection, TextPos};
 
@@ -18,14 +19,32 @@ pub(super) enum Drag {
     Select { anchor: TextPos },
     /// Panning the view.
     Pan,
+    /// Pressed on a note or text box: dragging moves it, a click edits it.
+    /// `rect` is where it is being dragged to (page coordinates); `grab` is
+    /// the pointer's offset from its top-left corner.
+    Annot {
+        page: usize,
+        xref: i32,
+        grab: (f32, f32),
+        rect: crate::text::TextRect,
+        moved: bool,
+    },
+    /// Pressed on a comment bubble: a click edits the comment.
+    Bubble { page: usize, xref: i32 },
 }
 
 /// The right-click menu.
 pub(super) struct ContextMenu {
     pos: Pos2,
     link: Option<LinkTarget>,
-    /// The annotation under the pointer: page, xref, kind.
-    annot: Option<(usize, i32, crate::annotate::AnnotKind)>,
+    /// The annotation under the pointer: page, xref, kind, has a comment.
+    annot: Option<(usize, i32, crate::annotate::AnnotKind, bool)>,
+    /// The point clicked, on a page (page coordinates).
+    at: Option<(usize, f32, f32)>,
+    /// The frame it opened in. A trackpad tap delivers the button's press
+    /// and release in the same frame; that press must not count as a click
+    /// outside the menu (which would close it at once).
+    opened: u64,
 }
 
 impl VimpdfApp {
@@ -300,6 +319,33 @@ impl VimpdfApp {
             Modifier::Cmd => modifiers.mac_cmd || modifiers.command,
         };
 
+        // Pressing a comment bubble, a note or a text box.
+        if pointer.primary_pressed()
+            && self.drag.is_none()
+            && !pan_held
+            && !modifiers.shift
+            && let Some(press) = pointer.press_origin().filter(|p| area.contains(*p))
+        {
+            if let Some(a) = self.bubble_at(area, press) {
+                self.drag = Some(Drag::Bubble {
+                    page: a.page,
+                    xref: a.xref,
+                });
+            } else if let Some(a) = self.annot_at(area, press)
+                && matches!(a.kind, AnnotKind::Note | AnnotKind::Text)
+                && let [rect] = a.rects[..]
+                && let Some((_, px, py)) = self.page_point(area, press)
+            {
+                self.drag = Some(Drag::Annot {
+                    page: a.page,
+                    xref: a.xref,
+                    grab: (px - rect.x0, py - rect.y0),
+                    rect,
+                    moved: false,
+                });
+            }
+        }
+
         // Start a drag.
         if let Some(press) = pointer.press_origin().filter(|p| area.contains(*p))
             && self.drag.is_none()
@@ -323,6 +369,31 @@ impl VimpdfApp {
                     commands.push(Command::ScrollBy { dx: -d.x, dy: -d.y });
                 }
             }
+            Some(Drag::Annot {
+                page,
+                grab,
+                ref mut rect,
+                ref mut moved,
+                ..
+            }) if pointer.is_decidedly_dragging() => {
+                if let Some(pos) = pointer.latest_pos()
+                    && let Some(vp) = &self.viewport
+                {
+                    let rel = pos - area.min;
+                    let (x, y) = vp.to_doc(rel.x, rel.y);
+                    let r = self.view.layout.page(page);
+                    let (w, h) = (rect.x1 - rect.x0, rect.y1 - rect.y0);
+                    let x0 = (x - r.x - grab.0).clamp(0.0, (r.w - w).max(0.0));
+                    let y0 = (y - r.y - grab.1).clamp(0.0, (r.h - h).max(0.0));
+                    *rect = crate::text::TextRect {
+                        x0,
+                        y0,
+                        x1: x0 + w,
+                        y1: y0 + h,
+                    };
+                    *moved = true;
+                }
+            }
             Some(Drag::Select { anchor }) if pointer.is_decidedly_dragging() => {
                 if let Some(pos) = pointer.latest_pos()
                     && let Some(caret) = self.text_pos_at(area, pos)
@@ -342,9 +413,24 @@ impl VimpdfApp {
 
         let released = !pointer.any_down();
         if released && let Some(drag) = self.drag.take() {
-            let selected = matches!(drag, Drag::Select { .. }) && self.mode == Mode::Visual;
-            if selected && self.config.copy_on_select {
-                commands.push(Command::Yank);
+            match drag {
+                Drag::Annot {
+                    page,
+                    xref,
+                    rect,
+                    moved: true,
+                    ..
+                } => self
+                    .view
+                    .editor
+                    .request(crate::annotate::EditRequest::SetRect { page, xref, rect }),
+                Drag::Annot { page, xref, .. } | Drag::Bubble { page, xref } => {
+                    commands.push(Command::EditComment { page, xref });
+                }
+                Drag::Select { .. } if self.mode == Mode::Visual && self.config.copy_on_select => {
+                    commands.push(Command::Yank);
+                }
+                _ => {}
             }
         }
 
@@ -390,17 +476,45 @@ impl VimpdfApp {
                 )
                 .map(|l| l.target.clone())
             });
-            let annot = self.annot_at(area, pos).map(|a| (a.page, a.xref, a.kind));
-            self.menu = Some(ContextMenu { pos, link, annot });
+            let annot = self
+                .bubble_at(area, pos)
+                .or_else(|| self.annot_at(area, pos))
+                .map(|a| (a.page, a.xref, a.kind, !a.contents.is_empty()));
+            let at = self.page_point(area, pos);
+            self.menu = Some(ContextMenu {
+                pos,
+                link,
+                annot,
+                at,
+                opened: ctx.cumulative_pass_nr(),
+            });
         }
 
+        let over_box = |p: Pos2| {
+            self.bubble_at(area, p).is_some()
+                || self
+                    .annot_at(area, p)
+                    .is_some_and(|a| matches!(a.kind, AnnotKind::Note | AnnotKind::Text))
+        };
         let cursor = match self.drag {
-            Some(Drag::Pan) => Some(CursorIcon::Grabbing),
+            Some(Drag::Pan) | Some(Drag::Annot { moved: true, .. }) => Some(CursorIcon::Grabbing),
+            Some(Drag::Annot { .. }) | Some(Drag::Bubble { .. }) => Some(CursorIcon::PointingHand),
             Some(Drag::Select { .. }) => Some(CursorIcon::Text),
+            None if hover.is_some_and(over_box) => Some(CursorIcon::PointingHand),
             None if hover.is_some_and(|p| self.over_text(area, p)) => Some(CursorIcon::Text),
             None => None,
         };
         (commands, cursor)
+    }
+
+    /// A point of the page area as (page, x, y) in page coordinates.
+    pub(super) fn page_point(&self, area: Rect, pos: Pos2) -> Option<(usize, f32, f32)> {
+        let vp = self.viewport.as_ref()?;
+        let rel = pos - area.min;
+        let (x, y) = vp.to_doc(rel.x, rel.y);
+        let page = self.view.layout.page_containing(x, y)?;
+        let r = self.view.layout.page(page);
+        Some((page, x - r.x, y - r.y))
     }
 
     fn select_range(&mut self, a: TextPos, b: TextPos) {
@@ -420,6 +534,8 @@ impl VimpdfApp {
         let has_selection = self.selection.is_some();
         let link = menu.link.clone();
         let annot = menu.annot;
+        let at = menu.at;
+        let just_opened = menu.opened == ctx.cumulative_pass_nr();
         let palette: Vec<(char, [u8; 3])> = self
             .config
             .highlight_colors
@@ -461,13 +577,48 @@ impl VimpdfApp {
                             chosen = Some(Command::Comment);
                         }
                     }
-                    if let Some((page, xref, kind)) = annot {
+                    if let Some((page, xref, kind, commented)) = annot {
                         ui.separator();
-                        let name = kind.name();
-                        if item(ui, &format!("Edit {name} comment…"), "<C-a> e", true) {
+                        let edit = match kind {
+                            AnnotKind::Note => "Edit note…",
+                            AnnotKind::Text => "Edit text…",
+                            _ if commented => "Edit comment…",
+                            _ => "Add comment…",
+                        };
+                        if item(ui, edit, "<C-a> e", true) {
                             chosen = Some(Command::EditComment { page, xref });
                         }
-                        if kind == crate::annotate::AnnotKind::Highlight {
+                        if kind == AnnotKind::Highlight
+                            && commented
+                            && item(ui, "Remove comment (keep highlight)", "", true)
+                        {
+                            chosen = Some(Command::RemoveComment { page, xref });
+                        }
+                        if kind.movable()
+                            && item(ui, &format!("Move {}", kind.name()), "<C-a> m", true)
+                        {
+                            chosen = Some(Command::MoveAnnot { page, xref });
+                        }
+                        if kind == AnnotKind::Text {
+                            if item(ui, "Bigger text", "<C-a> +", true) {
+                                chosen = Some(Command::AnnotFontSize {
+                                    page,
+                                    xref,
+                                    bigger: true,
+                                });
+                            }
+                            if item(ui, "Smaller text", "<C-a> -", true) {
+                                chosen = Some(Command::AnnotFontSize {
+                                    page,
+                                    xref,
+                                    bigger: false,
+                                });
+                            }
+                        }
+                        if matches!(
+                            kind,
+                            AnnotKind::Highlight | AnnotKind::Note | AnnotKind::Text
+                        ) {
                             ui.menu_button("Change colour", |ui| {
                                 for (letter, [r, g, b]) in &palette {
                                     let label = egui::RichText::new(format!(
@@ -484,8 +635,17 @@ impl VimpdfApp {
                                 }
                             });
                         }
-                        if item(ui, &format!("Delete {name}"), "<C-a> d", true) {
+                        if item(ui, &format!("Delete {}", kind.name()), "<C-a> d", true) {
                             chosen = Some(Command::DeleteAnnot { page, xref });
+                        }
+                    }
+                    if let Some((page, x, y)) = at {
+                        ui.separator();
+                        if item(ui, "Add note here", "C", true) {
+                            chosen = Some(Command::AddNoteAt { page, x, y });
+                        }
+                        if item(ui, "Add text here", "T", true) {
+                            chosen = Some(Command::AddTextAt { page, x, y });
                         }
                     }
                     if let Some(target) = link {
@@ -505,7 +665,7 @@ impl VimpdfApp {
             })
             .response;
         let clicked_elsewhere =
-            ctx.input(|i| i.pointer.any_pressed()) && !response.contains_pointer();
+            !just_opened && ctx.input(|i| i.pointer.any_pressed()) && !response.contains_pointer();
         let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         if chosen.is_some() || clicked_elsewhere || escape {
             self.menu = None;

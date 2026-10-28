@@ -1,7 +1,9 @@
-//! Highlights, comments and the annotations panel; saving annotations.
+//! Highlights, comments, sticky notes, text boxes and the annotations panel;
+//! saving annotations.
 
-use eframe::egui::{Pos2, Stroke};
+use eframe::egui::{Pos2, Stroke, StrokeKind};
 
+use super::place::{NOTE_SIZE, note_icon, step_size};
 use super::*;
 use crate::annotate::{AnnotInfo, AnnotKind, EditEvent, EditRequest, NewAnnot};
 use crate::text::TextRect;
@@ -18,11 +20,26 @@ pub(super) enum CommentTarget {
         parts: Vec<(usize, Vec<TextRect>)>,
         color: [u8; 3],
     },
+    /// A sticky note / text box at this place, created when saved.
+    NewNote {
+        page: usize,
+        rect: TextRect,
+        color: [u8; 3],
+    },
+    NewText {
+        page: usize,
+        rect: TextRect,
+        size: f32,
+        color: [u8; 3],
+    },
     Existing {
         page: usize,
         xref: i32,
     },
 }
+
+/// Size of a comment bubble, in screen points.
+const BUBBLE: Vec2 = Vec2::new(18.0, 14.0);
 
 /// Annotation state of the app.
 #[derive(Default)]
@@ -91,6 +108,7 @@ impl VimpdfApp {
             parts,
             color,
             contents: String::new(),
+            font_size: 0.0,
         }));
         self.exit_visual();
     }
@@ -132,7 +150,12 @@ impl VimpdfApp {
         else {
             return self.error("Annotation not found");
         };
-        let editor = CommentEditor::new(format!("Comment (page {})", page + 1), a.contents.clone());
+        let what = match a.kind {
+            AnnotKind::Note => "Note",
+            AnnotKind::Text => "Text box",
+            _ => "Comment",
+        };
+        let editor = CommentEditor::new(format!("{what} (page {})", page + 1), a.contents.clone());
         self.annots.comment = Some((CommentTarget::Existing { page, xref }, editor));
         self.mode = Mode::Comment;
     }
@@ -151,6 +174,109 @@ impl VimpdfApp {
 
     pub(super) fn delete_annot(&mut self, page: usize, xref: i32) {
         self.view.editor.request(EditRequest::Delete { page, xref });
+    }
+
+    /// Right-click "Remove comment": the highlight stays.
+    pub(super) fn remove_comment(&mut self, page: usize, xref: i32) {
+        self.view.editor.request(EditRequest::SetContents {
+            page,
+            xref,
+            contents: String::new(),
+        });
+    }
+
+    /// Notes are yellow like paper notes: the default highlight colour.
+    pub(super) fn note_color(&self) -> [u8; 3] {
+        self.letter_color(self.config.highlight_default)
+            .unwrap_or([255, 224, 102])
+    }
+
+    pub(super) fn text_color(&self) -> [u8; 3] {
+        let c = self.config.text_color.0;
+        [c[0], c[1], c[2]]
+    }
+
+    /// Open the editor for a new sticky note at `rect`.
+    pub(super) fn write_new_note(&mut self, page: usize, rect: TextRect, color: [u8; 3]) {
+        self.annots.comment = Some((
+            CommentTarget::NewNote { page, rect, color },
+            CommentEditor::new(format!("New note (page {})", page + 1), String::new()),
+        ));
+        self.mode = Mode::Comment;
+    }
+
+    /// Open the editor for a new text box at `rect`.
+    pub(super) fn write_new_text(
+        &mut self,
+        page: usize,
+        rect: TextRect,
+        size: f32,
+        color: [u8; 3],
+    ) {
+        self.annots.comment = Some((
+            CommentTarget::NewText {
+                page,
+                rect,
+                size,
+                color,
+            },
+            CommentEditor::new(format!("New text box (page {})", page + 1), String::new()),
+        ));
+        self.mode = Mode::Comment;
+    }
+
+    /// Right-click "Add note here": the note's icon centred on the point.
+    pub(super) fn add_note_at(&mut self, page: usize, x: f32, y: f32) {
+        let r = self.view.layout.page(page);
+        let x0 = (x - NOTE_SIZE / 2.0).clamp(0.0, (r.w - NOTE_SIZE).max(0.0));
+        let y0 = (y - NOTE_SIZE / 2.0).clamp(0.0, (r.h - NOTE_SIZE).max(0.0));
+        let rect = TextRect {
+            x0,
+            y0,
+            x1: x0 + NOTE_SIZE,
+            y1: y0 + NOTE_SIZE,
+        };
+        let color = self.note_color();
+        self.write_new_note(page, rect, color);
+    }
+
+    /// Right-click "Add text here": a box starting at the point, as wide as
+    /// fits (up to 200 points); its height follows the text.
+    pub(super) fn add_text_at(&mut self, page: usize, x: f32, y: f32) {
+        let r = self.view.layout.page(page);
+        let size = self.config.text_size;
+        let x0 = x.clamp(0.0, (r.w - 40.0).max(0.0));
+        let rect = TextRect {
+            x0,
+            y0: y,
+            x1: (x0 + 200.0).min(r.w),
+            y1: y + size * 1.4,
+        };
+        let color = self.text_color();
+        self.write_new_text(page, rect, size, color);
+    }
+
+    /// A text box's font one size up or down.
+    pub(super) fn annot_font_size(&mut self, page: usize, xref: i32, bigger: bool) {
+        let Some(a) = self
+            .annots
+            .list
+            .iter()
+            .find(|a| a.page == page && a.xref == xref)
+        else {
+            return self.error("Annotation not found");
+        };
+        if a.kind != AnnotKind::Text {
+            return self.error("Only text boxes have a font size");
+        }
+        let size = step_size(a.font_size, bigger);
+        if size == a.font_size {
+            return self.info(format!("Text size {size} is the limit"));
+        }
+        self.view
+            .editor
+            .request(EditRequest::SetFontSize { page, xref, size });
+        self.info(format!("Text size {size}"));
     }
 
     pub(super) fn undo(&mut self) {
@@ -352,12 +478,39 @@ impl VimpdfApp {
             CommentOutcome::Save(text) => {
                 let (target, _) = self.annots.comment.take().expect("checked above");
                 self.mode = Mode::Normal;
+                let new_box = matches!(
+                    target,
+                    CommentTarget::NewNote { .. } | CommentTarget::NewText { .. }
+                );
+                if new_box && text.trim().is_empty() {
+                    return self.info("Nothing written: nothing added");
+                }
                 let req = match target {
+                    CommentTarget::NewNote { page, rect, color } => EditRequest::Create(NewAnnot {
+                        kind: AnnotKind::Note,
+                        parts: vec![(page, vec![rect])],
+                        color,
+                        contents: text,
+                        font_size: 0.0,
+                    }),
+                    CommentTarget::NewText {
+                        page,
+                        rect,
+                        size,
+                        color,
+                    } => EditRequest::Create(NewAnnot {
+                        kind: AnnotKind::Text,
+                        parts: vec![(page, vec![rect])],
+                        color,
+                        contents: text,
+                        font_size: size,
+                    }),
                     CommentTarget::New { parts, color } => EditRequest::Create(NewAnnot {
                         kind: AnnotKind::Highlight,
                         parts,
                         color,
                         contents: text,
+                        font_size: 0.0,
                     }),
                     CommentTarget::Existing { page, xref } => EditRequest::SetContents {
                         page,
@@ -461,6 +614,21 @@ impl VimpdfApp {
                 });
             }
             "c" => self.annots.await_color = true,
+            "m" => {
+                let a = self.selected_annot()?;
+                return Some(Command::MoveAnnot {
+                    page: a.page,
+                    xref: a.xref,
+                });
+            }
+            "+" | "-" => {
+                let a = self.selected_annot()?;
+                return Some(Command::AnnotFontSize {
+                    page: a.page,
+                    xref: a.xref,
+                    bigger: tok == "+",
+                });
+            }
             "u" => return Some(Command::Undo),
             "<Esc>" | "q" | "<C-a>" | "h" => self.mode = Mode::Normal,
             _ => {}
@@ -512,6 +680,10 @@ impl VimpdfApp {
     /// The text an annotation covers, if the page text is loaded.
     fn snippet(&self, a: &AnnotInfo) -> String {
         const MAX: usize = 120;
+        if matches!(a.kind, AnnotKind::Note | AnnotKind::Text) {
+            // Placed anywhere: no text of the page belongs to them.
+            return String::new();
+        }
         let Some(text) = self.view.text(a.page) else {
             return String::new();
         };
@@ -554,8 +726,73 @@ impl VimpdfApp {
         })
     }
 
-    /// Small markers on annotations that carry a comment, and a tooltip with
-    /// the comment when the pointer is over one.
+    /// Where the comment bubble of a commented highlight goes: just outside
+    /// the line it starts on, before the line's first word (or after its
+    /// last one, for highlights in the right half of the page).
+    fn bubble_rect(&self, area: Rect, vp: &Viewport, a: &AnnotInfo) -> Option<Rect> {
+        if a.contents.is_empty() || !matches!(a.kind, AnnotKind::Highlight | AnnotKind::Redact) {
+            return None;
+        }
+        let first = a.rects.first()?;
+        let p = self.view.layout.page(a.page);
+        let left_half = (first.x0 + first.x1) / 2.0 < p.w / 2.0;
+        // The line: characters level with the highlight's first rectangle,
+        // followed outwards while there is no wide gap (a margin stamp or
+        // the other column isn't part of it).
+        let (mid, height) = ((first.y0 + first.y1) / 2.0, first.y1 - first.y0);
+        let gap = 2.0 * height;
+        let (mut l, mut r) = (first.x0, first.x1);
+        if let Some(text) = self.view.text(a.page) {
+            let mut level: Vec<(f32, f32)> = text
+                .chars
+                .iter()
+                .filter(|c| {
+                    !c.c.is_whitespace() && ((c.y0 + c.y1) / 2.0 - mid).abs() < height / 2.0
+                })
+                .map(|c| (c.x0, c.x1))
+                .collect();
+            level.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for &(x0, x1) in level.iter().rev() {
+                if x1 <= l && l - x1 < gap {
+                    l = x0;
+                }
+            }
+            for &(x0, x1) in &level {
+                if x0 >= r && x0 - r < gap {
+                    r = x1;
+                }
+            }
+        }
+        let anchor = TextRect {
+            x0: l,
+            y0: first.y0,
+            x1: r,
+            y1: first.y1,
+        };
+        let line = self.page_rect_to_screen(area, vp, a.page, &anchor);
+        let x = if left_half {
+            line.left() - 6.0 - BUBBLE.x
+        } else {
+            line.right() + 6.0
+        };
+        Some(Rect::from_min_size(
+            Pos2::new(x, line.center().y - BUBBLE.y / 2.0),
+            BUBBLE,
+        ))
+    }
+
+    /// The commented highlight whose bubble is under `pos`.
+    pub(super) fn bubble_at(&self, area: Rect, pos: Pos2) -> Option<&AnnotInfo> {
+        let vp = self.viewport.as_ref()?;
+        self.annots.list.iter().rev().find(|a| {
+            self.bubble_rect(area, vp, a)
+                .is_some_and(|r| r.expand(2.0).contains(pos))
+        })
+    }
+
+    /// Comment bubbles in the margin next to commented highlights, outlines
+    /// on hovered notes and text boxes, a box being dragged, and a tooltip
+    /// with the comment under the pointer.
     pub(super) fn draw_annotation_markers(
         &self,
         ctx: &egui::Context,
@@ -565,43 +802,116 @@ impl VimpdfApp {
     ) {
         let layout = &self.view.layout;
         let visible = layout.pages_in(vp.y, vp.y + vp.doc_height());
-        for a in &self.annots.list {
-            if a.contents.is_empty() || !visible.contains(&a.page) {
-                continue;
-            }
-            let Some(first) = a.rects.first() else {
-                continue;
-            };
-            let p = layout.page(a.page);
-            let (x, y) = vp.to_view(p.x + first.x0, p.y + first.y0);
-            let centre = area.min + Vec2::new(x, y);
-            let [r, g, b] = a.color;
-            painter.circle(
-                centre,
-                5.0,
-                Color32::from_rgb(r, g, b),
-                Stroke::new(1.5, Color32::from_gray(40)),
-            );
-        }
-        if self.mode != Mode::Normal && self.mode != Mode::Visual {
-            return;
-        }
         let hover = ctx
             .input(|i| i.pointer.hover_pos())
             .filter(|p| area.contains(*p));
-        if let Some(pos) = hover
-            && let Some(a) = self.annot_at(area, pos)
-            && !a.contents.is_empty()
-        {
-            egui::Area::new(egui::Id::unique("vimpdf-annot-tip-area"))
-                .order(egui::Order::Tooltip)
-                .fixed_pos(pos + Vec2::new(14.0, 14.0))
-                .show(ctx, |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.set_max_width(360.0);
-                        ui.label(&a.contents);
-                    });
-                });
+        let interactive = matches!(self.mode, Mode::Normal | Mode::Visual) && self.menu.is_none();
+        let bubble_hit = hover
+            .filter(|_| interactive)
+            .and_then(|p| self.bubble_at(area, p));
+        for a in &self.annots.list {
+            if !visible.contains(&a.page) {
+                continue;
+            }
+            let Some(r) = self.bubble_rect(area, vp, a) else {
+                continue;
+            };
+            let hot = bubble_hit.is_some_and(|b| b.xref == a.xref && b.page == a.page);
+            let [cr, cg, cb] = a.color;
+            draw_bubble(painter, r, Color32::from_rgb(cr, cg, cb), hot);
+            if hot {
+                for t in &a.rects {
+                    let t = self.page_rect_to_screen(area, vp, a.page, t);
+                    painter.rect_stroke(
+                        t,
+                        2.0,
+                        Stroke::new(1.5, Color32::from_gray(40)),
+                        StrokeKind::Outside,
+                    );
+                }
+            }
         }
+
+        // A note or text box being dragged.
+        if let Some(Drag::Annot {
+            page, xref, rect, ..
+        }) = self.drag
+        {
+            let r = self.page_rect_to_screen(area, vp, page, &rect);
+            let kind = self
+                .annots
+                .list
+                .iter()
+                .find(|a| a.page == page && a.xref == xref)
+                .map(|a| (a.kind, a.color));
+            if let Some((AnnotKind::Note, [nr, ng, nb])) = kind {
+                note_icon(painter, r, Color32::from_rgba_unmultiplied(nr, ng, nb, 180));
+            }
+            painter.rect_stroke(r, 2.0, Stroke::new(1.5, ACCENT_BLUE), StrokeKind::Outside);
+            return;
+        }
+
+        if !interactive {
+            return;
+        }
+        let Some(pos) = hover else { return };
+        let target = bubble_hit.or_else(|| self.annot_at(area, pos));
+        let Some(a) = target else { return };
+        if matches!(a.kind, AnnotKind::Note | AnnotKind::Text) {
+            for t in &a.rects {
+                let t = self.page_rect_to_screen(area, vp, a.page, t);
+                painter.rect_stroke(t, 2.0, Stroke::new(1.0, ACCENT_BLUE), StrokeKind::Outside);
+            }
+        }
+        // A text box shows its text on the page already.
+        if a.contents.is_empty() || a.kind == AnnotKind::Text {
+            return;
+        }
+        egui::Area::new(egui::Id::unique("vimpdf-annot-tip-area"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(pos + Vec2::new(14.0, 14.0))
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_max_width(360.0);
+                    ui.label(&a.contents);
+                    ui.label(
+                        egui::RichText::new("click to edit")
+                            .small()
+                            .color(Color32::GRAY),
+                    );
+                });
+            });
+    }
+}
+
+const ACCENT_BLUE: Color32 = Color32::from_rgb(51, 154, 240);
+
+/// A speech bubble with three dots, filled with the highlight's colour.
+fn draw_bubble(painter: &egui::Painter, r: Rect, fill: Color32, hot: bool) {
+    let r = if hot { r.expand(1.5) } else { r };
+    let outline = Stroke::new(if hot { 1.8 } else { 1.2 }, Color32::from_gray(40));
+    let body = Rect::from_min_max(r.min, Pos2::new(r.max.x, r.max.y - 3.0));
+    let tail = vec![
+        Pos2::new(body.left() + 4.0, body.bottom() - 0.5),
+        Pos2::new(body.left() + 3.0, r.bottom() + 1.0),
+        Pos2::new(body.left() + 9.0, body.bottom() - 0.5),
+    ];
+    painter.add(egui::Shape::convex_polygon(tail.clone(), fill, outline));
+    painter.rect_filled(body, 4.0, fill);
+    painter.rect_stroke(body, 4.0, outline, StrokeKind::Inside);
+    // Cover the tail's top edge so body and tail read as one shape.
+    painter.line_segment(
+        [
+            tail[0] + Vec2::new(0.8, -0.6),
+            tail[2] + Vec2::new(-0.8, -0.6),
+        ],
+        Stroke::new(1.6, fill),
+    );
+    for i in -1..=1 {
+        painter.circle_filled(
+            body.center() + Vec2::new(i as f32 * 4.0, 0.0),
+            1.3,
+            Color32::from_gray(40),
+        );
     }
 }

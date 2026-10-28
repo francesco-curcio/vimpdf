@@ -14,7 +14,15 @@ const MOUSE: &[(&str, &str)] = &[
     ("double / triple click", "select word / line (gv, V)"),
     ("Shift + click", "extend the selection"),
     ("Alt + drag, middle drag", "pan (h j k l)"),
-    ("right click", "menu: copy (y), search (*), link (f, yf)"),
+    (
+        "right click",
+        "menu: copy, highlight, comment, add note / text here, edit, move, delete, link",
+    ),
+    (
+        "click a comment bubble, note or text box",
+        "edit it (<C-a> e)",
+    ),
+    ("drag a note or text box", "move it (<C-a> m)"),
     ("click page number in status bar", "go to page (:<n>)"),
 ];
 

@@ -16,8 +16,9 @@ pub enum Mode {
     Annotations,
     /// Writing a comment.
     Comment,
-    /// Placing a rectangle to redact (`X`).
-    RedactArea,
+    /// Placing a box on the page: a redaction area (`X`), a note (`C`), a
+    /// text box (`T`), or moving one of these.
+    Place,
     /// A menu of the menu bar is open.
     Menu,
 }
@@ -33,7 +34,7 @@ impl Mode {
             Mode::Outline => "OUTLINE",
             Mode::Annotations => "ANNOTATIONS",
             Mode::Comment => "COMMENT",
-            Mode::RedactArea => "REDACT AREA",
+            Mode::Place => "PLACE",
             Mode::Menu => "MENU",
         }
     }

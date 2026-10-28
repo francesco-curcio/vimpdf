@@ -1,5 +1,5 @@
-//! Annotations: highlights, comments and redaction marks, stored as standard
-//! PDF annotations.
+//! Annotations: highlights, comments, sticky notes, text boxes and redaction
+//! marks, stored as standard PDF annotations.
 //!
 //! An editor thread owns a writable MuPDF `PdfDocument`. Every change is
 //! applied there and then written to a fresh *working copy* file that the
@@ -26,6 +26,8 @@ pub enum AnnotKind {
     Highlight,
     /// A sticky note (`Text` annotation).
     Note,
+    /// Text written on the page (`FreeText` annotation).
+    Text,
     /// A redaction mark, applied by `:redact`.
     Redact,
     /// Any other kind (ink, stamps…): listed, not editable.
@@ -33,10 +35,17 @@ pub enum AnnotKind {
 }
 
 impl AnnotKind {
+    /// Whether the annotation is a box that can be moved (and has no text
+    /// of the page under it).
+    pub fn movable(self) -> bool {
+        matches!(self, AnnotKind::Note | AnnotKind::Text | AnnotKind::Redact)
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             AnnotKind::Highlight => "highlight",
             AnnotKind::Note => "note",
+            AnnotKind::Text => "text box",
             AnnotKind::Redact => "redaction",
             AnnotKind::Other => "annotation",
         }
@@ -53,6 +62,57 @@ pub struct AnnotInfo {
     pub color: [u8; 3],
     pub rects: Vec<TextRect>,
     pub contents: String,
+    /// Font size of a text box (0 for other kinds).
+    pub font_size: f32,
+}
+
+/// The font of text boxes: Helvetica, one of the PDF standard fonts.
+const TEXT_FONT: &str = "Helv";
+/// MuPDF's line height for text boxes, in multiples of the font size.
+const TEXT_LINE_HEIGHT: f32 = 1.2;
+
+/// How many lines MuPDF breaks `text` into in a text box `width` wide: it
+/// wraps at the last space before the width is exceeded, and at newlines.
+fn text_lines(text: &str, size: f32, width: f32, advance: impl Fn(char) -> f32) -> usize {
+    text.split('\n')
+        .map(|para| {
+            let mut lines = 1;
+            let (mut x, mut space) = (0.0, None);
+            let chars: Vec<char> = para.chars().collect();
+            let mut i = 0;
+            while i < chars.len() {
+                let c = chars[i];
+                if c == ' ' {
+                    space = Some(i);
+                }
+                x += advance(c) * size;
+                if x > width
+                    && let Some(sp) = space
+                {
+                    // The next line starts after that space.
+                    lines += 1;
+                    i = sp + 1;
+                    x = 0.0;
+                    space = None;
+                    continue;
+                }
+                i += 1;
+            }
+            lines
+        })
+        .sum()
+}
+
+/// The height a text box needs to show all of its text.
+fn text_box_height(text: &str, size: f32, width: f32) -> f32 {
+    let font = mupdf::Font::new("Helvetica").ok();
+    let advance = |c: char| {
+        font.as_ref()
+            .and_then(|f| f.advance_glyph(f.encode_character(c as i32).ok()?).ok())
+            .unwrap_or(0.55)
+    };
+    let lines = text_lines(text, size, width, advance).max(1);
+    lines as f32 * TEXT_LINE_HEIGHT * size + 0.2 * size
 }
 
 /// What a new annotation looks like.
@@ -63,6 +123,8 @@ pub struct NewAnnot {
     pub parts: Vec<(usize, Vec<TextRect>)>,
     pub color: [u8; 3],
     pub contents: String,
+    /// Font size of a text box (ignored for other kinds).
+    pub font_size: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +139,17 @@ pub enum EditRequest {
         page: usize,
         xref: i32,
         color: [u8; 3],
+    },
+    /// Move / resize a note, text box or redaction mark.
+    SetRect {
+        page: usize,
+        xref: i32,
+        rect: TextRect,
+    },
+    SetFontSize {
+        page: usize,
+        xref: i32,
+        size: f32,
     },
     Delete {
         page: usize,
@@ -202,6 +275,16 @@ enum Inverse {
         xref: i32,
         color: [u8; 3],
     },
+    SetRect {
+        page: usize,
+        xref: i32,
+        rect: TextRect,
+    },
+    SetFontSize {
+        page: usize,
+        xref: i32,
+        size: f32,
+    },
 }
 
 struct EditorState {
@@ -299,6 +382,7 @@ fn kind_of(t: PdfAnnotationType) -> Option<AnnotKind> {
     match t {
         PdfAnnotationType::Highlight => Some(AnnotKind::Highlight),
         PdfAnnotationType::Text => Some(AnnotKind::Note),
+        PdfAnnotationType::FreeText => Some(AnnotKind::Text),
         PdfAnnotationType::Redact => Some(AnnotKind::Redact),
         // Not annotations a reader thinks of as theirs.
         PdfAnnotationType::Link | PdfAnnotationType::Popup | PdfAnnotationType::Widget => None,
@@ -365,6 +449,50 @@ impl EditorState {
         }
     }
 
+    fn mupdf_rect(&self, page: usize, r: &TextRect) -> Rect {
+        let (ox, oy) = self.origins[page];
+        Rect {
+            x0: r.x0 + ox,
+            y0: r.y0 + oy,
+            x1: r.x1 + ox,
+            y1: r.y1 + oy,
+        }
+    }
+
+    /// Set a text box's text colour or size, keeping the rest of its
+    /// default appearance.
+    fn set_text_style(
+        a: &mut PdfAnnotation,
+        color: Option<[u8; 3]>,
+        size: Option<f32>,
+    ) -> Result<()> {
+        let da = a.default_appearance()?;
+        let font = da
+            .as_ref()
+            .map_or(TEXT_FONT.to_owned(), |d| d.font_name.clone());
+        let size = size.or(da.as_ref().map(|d| d.size)).unwrap_or(12.0);
+        let color = match color {
+            Some(c) => Some(rgb_to_color(c)),
+            None => da.and_then(|d| d.color),
+        };
+        a.set_default_appearance(&font, size, color)?;
+        Ok(())
+    }
+
+    /// Make a text box exactly as tall as its text (the width is the
+    /// user's; MuPDF clips text that doesn't fit).
+    fn fit_text_box(a: &mut PdfAnnotation) -> Result<()> {
+        if a.r#type()? != PdfAnnotationType::FreeText {
+            return Ok(());
+        }
+        let size = a.default_appearance()?.map_or(12.0, |d| d.size);
+        let text = a.contents()?.unwrap_or_default().to_owned();
+        let mut r = a.rect()?;
+        r.y1 = r.y0 + text_box_height(&text, size, r.x1 - r.x0);
+        a.set_rect(r)?;
+        Ok(())
+    }
+
     fn quad(&self, page: usize, r: &TextRect) -> Quad {
         let (ox, oy) = self.origins[page];
         let p = |x: f32, y: f32| Point {
@@ -401,13 +529,20 @@ impl EditorState {
         } else {
             vec![self.to_page_rect(page, a.rect()?)]
         };
+        // A text box's colour is its text colour, in its default appearance.
+        let (color, font_size) = match (kind, a.default_appearance()?) {
+            (AnnotKind::Text, Some(da)) => (color_to_rgb(da.color), da.size),
+            (AnnotKind::Text, None) => ([0, 0, 0], 12.0),
+            _ => (color_to_rgb(a.color()?), 0.0),
+        };
         Ok(Some(AnnotInfo {
             page,
             xref: a.xref()?,
             kind,
-            color: color_to_rgb(a.color()?),
+            color,
             rects,
             contents: a.contents()?.unwrap_or_default().to_owned(),
+            font_size,
         }))
     }
 
@@ -431,6 +566,7 @@ impl EditorState {
             AnnotKind::Highlight => PdfAnnotationType::Highlight,
             AnnotKind::Redact => PdfAnnotationType::Redact,
             AnnotKind::Note => PdfAnnotationType::Text,
+            AnnotKind::Text => PdfAnnotationType::FreeText,
             AnnotKind::Other => bail!("cannot create this kind of annotation"),
         };
         let mut created = Vec::new();
@@ -441,23 +577,28 @@ impl EditorState {
             let mut p = self.page(*page)?;
             let mut a = p.create_annotation(subtype)?;
             let quads: Vec<Quad> = rects.iter().map(|r| self.quad(*page, r)).collect();
-            if annot.kind == AnnotKind::Note {
-                let q = &quads[0];
-                a.set_rect(Rect {
-                    x0: q.ul.x,
-                    y0: q.ul.y,
-                    x1: q.ul.x + 18.0,
-                    y1: q.ul.y + 18.0,
-                })?;
-            } else {
-                a.set_quad_points(AnnotationQuadPoints::new(quads))?;
+            match annot.kind {
+                AnnotKind::Note | AnnotKind::Text => {
+                    a.set_rect(self.mupdf_rect(*page, &rects[0]))?;
+                }
+                _ => a.set_quad_points(AnnotationQuadPoints::new(quads))?,
             }
-            if annot.kind != AnnotKind::Redact {
-                a.set_color(rgb_to_color(annot.color))?;
+            match annot.kind {
+                AnnotKind::Redact => {}
+                AnnotKind::Text => {
+                    a.set_default_appearance(
+                        TEXT_FONT,
+                        annot.font_size,
+                        Some(rgb_to_color(annot.color)),
+                    )?;
+                    a.set_border_width(0.0)?;
+                }
+                _ => a.set_color(rgb_to_color(annot.color))?,
             }
             if !annot.contents.is_empty() {
                 a.set_contents(&annot.contents)?;
             }
+            Self::fit_text_box(&mut a)?;
             a.set_author(&self.author)?;
             a.update()?;
             created.push((*page, a.xref()?));
@@ -511,6 +652,7 @@ impl EditorState {
                 let mut a = self.find(&p, xref)?;
                 let old = a.contents()?.unwrap_or_default().to_owned();
                 a.set_contents(&contents)?;
+                Self::fit_text_box(&mut a)?;
                 a.update()?;
                 let xref = a.xref()?;
                 let inv = Inverse::SetContents {
@@ -523,14 +665,44 @@ impl EditorState {
             EditRequest::SetColor { page, xref, color } => {
                 let p = self.page(page)?;
                 let mut a = self.find(&p, xref)?;
-                let old = color_to_rgb(a.color()?);
-                a.set_color(rgb_to_color(color))?;
+                let old = self.info(page, &a)?.map_or([0, 0, 0], |i| i.color);
+                self.set_color(&mut a, color)?;
                 a.update()?;
                 let xref = a.xref()?;
                 let inv = Inverse::SetColor {
                     page,
                     xref,
                     color: old,
+                };
+                (vec![page], Some(vec![inv]))
+            }
+            EditRequest::SetRect { page, xref, rect } => {
+                let p = self.page(page)?;
+                let mut a = self.find(&p, xref)?;
+                let old = self.to_page_rect(page, a.rect()?);
+                a.set_rect(self.mupdf_rect(page, &rect))?;
+                Self::fit_text_box(&mut a)?;
+                a.update()?;
+                let xref = a.xref()?;
+                let inv = Inverse::SetRect {
+                    page,
+                    xref,
+                    rect: old,
+                };
+                (vec![page], Some(vec![inv]))
+            }
+            EditRequest::SetFontSize { page, xref, size } => {
+                let p = self.page(page)?;
+                let mut a = self.find(&p, xref)?;
+                let old = a.default_appearance()?.map_or(12.0, |d| d.size);
+                Self::set_text_style(&mut a, None, Some(size))?;
+                Self::fit_text_box(&mut a)?;
+                a.update()?;
+                let xref = a.xref()?;
+                let inv = Inverse::SetFontSize {
+                    page,
+                    xref,
+                    size: old,
                 };
                 (vec![page], Some(vec![inv]))
             }
@@ -569,6 +741,7 @@ impl EditorState {
                 parts: vec![(page, info.rects)],
                 color: info.color,
                 contents: info.contents,
+                font_size: info.font_size,
             },
         })
     }
@@ -594,16 +767,41 @@ impl EditorState {
                 let p = self.page(page)?;
                 let mut a = self.find(&p, xref)?;
                 a.set_contents(&contents)?;
+                Self::fit_text_box(&mut a)?;
                 a.update()?;
                 Ok(vec![page])
             }
             Inverse::SetColor { page, xref, color } => {
                 let p = self.page(page)?;
                 let mut a = self.find(&p, xref)?;
-                a.set_color(rgb_to_color(color))?;
+                self.set_color(&mut a, color)?;
                 a.update()?;
                 Ok(vec![page])
             }
+            Inverse::SetRect { page, xref, rect } => {
+                let p = self.page(page)?;
+                let mut a = self.find(&p, xref)?;
+                a.set_rect(self.mupdf_rect(page, &rect))?;
+                a.update()?;
+                Ok(vec![page])
+            }
+            Inverse::SetFontSize { page, xref, size } => {
+                let p = self.page(page)?;
+                let mut a = self.find(&p, xref)?;
+                Self::set_text_style(&mut a, None, Some(size))?;
+                Self::fit_text_box(&mut a)?;
+                a.update()?;
+                Ok(vec![page])
+            }
+        }
+    }
+
+    /// A text box's colour is its text colour; other kinds have a /C colour.
+    fn set_color(&self, a: &mut PdfAnnotation, color: [u8; 3]) -> Result<()> {
+        if a.r#type()? == PdfAnnotationType::FreeText {
+            Self::set_text_style(a, Some(color), None)
+        } else {
+            Ok(a.set_color(rgb_to_color(color))?)
         }
     }
 
@@ -812,6 +1010,131 @@ mod tests {
         }
     }
 
+    /// Notes and text boxes: created where asked, with their text, colour
+    /// and size; moving and resizing the text are undoable.
+    #[test]
+    fn notes_and_text_boxes() {
+        let dir = std::env::temp_dir().join(format!("vimpdf-text-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("doc.pdf");
+        std::fs::write(&src, crate::welcome::pdf_bytes()).unwrap();
+        let mut st = EditorState::open(&src, "t".into()).unwrap();
+        let new = |kind, r: TextRect, contents: &str| NewAnnot {
+            kind,
+            parts: vec![(0, vec![r])],
+            color: [200, 0, 0],
+            contents: contents.into(),
+            font_size: 14.0,
+        };
+        let boxed = rect(100.0, 300.0, 300.0, 340.0);
+        st.handle(EditRequest::Create(new(
+            AnnotKind::Text,
+            boxed,
+            "Margin remark",
+        )))
+        .unwrap();
+        st.handle(EditRequest::Create(new(
+            AnnotKind::Note,
+            rect(50.0, 50.0, 68.0, 68.0),
+            "A note",
+        )))
+        .unwrap();
+        let all = st.read_all();
+        let text = all.iter().find(|a| a.kind == AnnotKind::Text).unwrap();
+        assert_eq!(text.contents, "Margin remark");
+        assert_eq!(text.color, [200, 0, 0]);
+        assert_eq!(text.font_size, 14.0);
+        let r = text.rects[0];
+        assert!(
+            (r.x0 - 100.0).abs() < 1.0 && (r.y0 - 300.0).abs() < 1.0,
+            "{r:?}"
+        );
+        let note = all.iter().find(|a| a.kind == AnnotKind::Note).unwrap();
+        assert_eq!(note.contents, "A note");
+
+        // The text box is drawn on the page: its text is in the page text.
+        let EditEvent::Changed { working_copy, .. } = st
+            .handle(EditRequest::SetFontSize {
+                page: 0,
+                xref: text.xref,
+                size: 18.0,
+            })
+            .unwrap()
+        else {
+            panic!("expected Changed")
+        };
+        assert!(working_copy.exists());
+        // The box fits one line of its text.
+        let r = st
+            .read_all()
+            .into_iter()
+            .find(|a| a.kind == AnnotKind::Text)
+            .unwrap()
+            .rects[0];
+        assert!(
+            (r.y1 - r.y0 - text_box_height("x", 18.0, 200.0)).abs() < 0.5,
+            "{r:?}"
+        );
+
+        let moved = rect(150.0, 400.0, 350.0, 440.0);
+        st.handle(EditRequest::SetRect {
+            page: 0,
+            xref: text.xref,
+            rect: moved,
+        })
+        .unwrap();
+        st.handle(EditRequest::SetColor {
+            page: 0,
+            xref: text.xref,
+            color: [0, 0, 255],
+        })
+        .unwrap();
+        let find = |st: &EditorState| {
+            st.read_all()
+                .into_iter()
+                .find(|a| a.kind == AnnotKind::Text)
+                .unwrap()
+        };
+        let now = find(&st);
+        assert_eq!((now.font_size, now.color), (18.0, [0, 0, 255]));
+        assert!((now.rects[0].y0 - 400.0).abs() < 1.0);
+        for _ in 0..3 {
+            st.handle(EditRequest::Undo).unwrap();
+        }
+        let back = find(&st);
+        assert_eq!((back.font_size, back.color), (14.0, [200, 0, 0]));
+        assert!((back.rects[0].y0 - 300.0).abs() < 1.0);
+
+        // Deleting and undoing brings the box back with its style.
+        st.handle(EditRequest::Delete {
+            page: 0,
+            xref: back.xref,
+        })
+        .unwrap();
+        st.handle(EditRequest::Undo).unwrap();
+        let again = find(&st);
+        assert_eq!(
+            (again.contents.as_str(), again.font_size, again.color),
+            ("Margin remark", 14.0, [200, 0, 0])
+        );
+
+        st.cleanup();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn text_box_lines_follow_mupdf_wrapping() {
+        // Every character 0.5 em wide: 10 pt text, 50 pt wide box = 10 chars.
+        let lines = |t: &str| text_lines(t, 10.0, 50.0, |_| 0.5);
+        assert_eq!(lines("short"), 1);
+        assert_eq!(lines("aaaa bbbb cccc"), 2);
+        assert_eq!(lines("aaaa bbbb cccc dddd eeee"), 3);
+        assert_eq!(lines("one\ntwo\n\nfour"), 4);
+        // A word longer than the box isn't broken.
+        assert_eq!(lines("aaaaaaaaaaaaaaaaaaaa"), 1);
+        assert!(text_box_height("a b c", 12.0, 10.0) > text_box_height("a b c", 12.0, 500.0));
+    }
+
     /// Redacting a marked word removes it from the written copy and leaves
     /// the original alone.
     #[test]
@@ -832,6 +1155,7 @@ mod tests {
             parts: vec![(0, rects)],
             color: [0, 0, 0],
             contents: String::new(),
+            font_size: 0.0,
         }))
         .unwrap();
         let out = dir.join("doc-redacted.pdf");
@@ -881,6 +1205,7 @@ mod tests {
             parts: vec![(0, vec![rect(72.0, 60.0, 200.0, 75.0)])],
             color: [255, 0, 0],
             contents: String::new(),
+            font_size: 0.0,
         };
         let ev = st.handle(EditRequest::Create(new)).unwrap();
         let EditEvent::Changed { annots, pages, .. } = ev else {

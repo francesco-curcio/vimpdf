@@ -75,6 +75,16 @@ Colours are `"#rrggbb"` or `"#rrggbbaa"`.
 | `default` | `"y"` | Colour used by `c` (comment) and the first `aa`. |
 | `author` | `""` | Author name written into new annotations; empty means your login name. |
 
+### `[text]`
+
+Text boxes (`T`, or "Add text here" in the right-click menu): text written
+on the page as a PDF `FreeText` annotation, in Helvetica.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `size` | `12` | Font size of new text boxes, in points (4–72). `+` / `-` while placing a box, or in the annotations panel, change it. |
+| `color` | `"#c92a2a"` | Text colour of new text boxes. `c<letter>` in the annotations panel switches a box to a highlight colour. |
+
 ## Key bindings
 
 ```toml
@@ -134,6 +144,8 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `undo` | `u` (normal and visual mode) |
 | `write [path]` | — (`:w`, `:w <path>`) |
 | `redact_area` | `X` |
+| `note` | `C` |
+| `text_box` | `T` |
 | `redact_matches` | — (`:redact-matches`) |
 | `apply_redactions [path]` | — (`:redact`, `:redact <path>`) |
 | `word_hints` | `gv` |

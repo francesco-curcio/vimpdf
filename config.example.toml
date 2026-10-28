@@ -42,6 +42,12 @@ colors = { y = "#ffe066", g = "#8ce99a", b = "#74c0fc", p = "#f783ac", r = "#ff8
 default = "y"         # colour of c (comment) and of the first aa
 author = ""           # written into new annotations; empty = your login name
 
+[text]
+# Text boxes (T): written on the page. Change one later in the annotations
+# panel (<C-a>): + / - for the size, c<letter> for a highlight colour.
+size = 12
+color = "#c92a2a"
+
 [keys.normal]
 # Examples (not defaults):
 # "x" = "scroll_down 3"

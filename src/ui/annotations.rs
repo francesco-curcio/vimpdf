@@ -39,14 +39,14 @@ pub fn show(
                 ui.set_min_size(rect.size() - Vec2::splat(16.0));
                 ui.set_max_size(rect.size() - Vec2::splat(16.0));
                 ui.label(
-                    RichText::new("Annotations  (j/k, Enter jump, e comment, c<letter> colour, d delete, Esc)")
+                    RichText::new("Annotations  (j/k, Enter jump, e edit, c<letter> colour, m move, +/- text size, d delete, Esc)")
                         .font(small.clone())
                         .color(BAR_DIM),
                 );
                 ui.separator();
                 if rows.is_empty() {
                     ui.label(
-                        RichText::new("No annotations yet. Select text (v or the mouse), then a<letter> to highlight or c to comment.")
+                        RichText::new("No annotations yet. Select text (v or the mouse), then a<letter> to highlight or c to comment; C adds a sticky note, T a text box.")
                             .color(BAR_DIM),
                     );
                     return;

@@ -94,6 +94,37 @@ pub enum Command {
         page: usize,
         xref: i32,
     },
+    /// Remove a highlight's comment, keeping the highlight.
+    RemoveComment {
+        page: usize,
+        xref: i32,
+    },
+    /// Move a note, text box or redaction mark (panel `m`, context menu).
+    MoveAnnot {
+        page: usize,
+        xref: i32,
+    },
+    /// A text box's font one step bigger / smaller (panel `+` / `-`).
+    AnnotFontSize {
+        page: usize,
+        xref: i32,
+        bigger: bool,
+    },
+    /// Place a sticky note (`C`) / a text box (`T`), then write its text.
+    PlaceNote,
+    PlaceText,
+    /// Add a note / text box at this point of a page (context menu), in
+    /// page coordinates.
+    AddNoteAt {
+        page: usize,
+        x: f32,
+        y: f32,
+    },
+    AddTextAt {
+        page: usize,
+        x: f32,
+        y: f32,
+    },
     /// Save annotations: into the file (`None`) or a copy.
     Write(Option<PathBuf>),
     WriteQuit,
@@ -202,6 +233,8 @@ const SIMPLE: &[(&str, Command)] = &[
     ("properties", Command::ToggleProperties),
     ("redact", Command::RedactSelection),
     ("redact_area", Command::RedactArea),
+    ("note", Command::PlaceNote),
+    ("text_box", Command::PlaceText),
     ("redact_matches", Command::RedactMatches),
     ("apply_redactions", Command::ApplyRedactions(None)),
     ("set_mark", Command::AwaitMark { set: true }),

@@ -163,7 +163,8 @@ Without a document vimpdf opens `welcome.rs`'s generated one-page PDF.
 
 `annotate.rs` runs an editor thread with a writable `mupdf::pdf::PdfDocument`
 of the open file. The UI sends `EditRequest`s (create a highlight/comment/
-redaction mark, set contents or colour, delete, undo, save); the editor applies
+redaction mark/sticky note/text box, set contents, colour, rectangle or font
+size, delete, undo, save); the editor applies
 them, keeps an undo stack of inverse operations (with a remap of object numbers
 for annotations recreated by undo), and after each change writes the whole
 document to a new working-copy file in a temp directory. The UI then calls
@@ -178,11 +179,20 @@ opens that as a separate document, runs MuPDF's page redaction with black
 boxes, pixel blanking for images, removal of covered line art and text
 removal, writes the result as a full rewrite with garbage collection, then
 re-opens the written file and checks the text under every mark is gone.
-`app/redact.rs` has marking (selection, search matches, area mode) and the
-result handling. `app/annotations.rs` holds the UI side of annotations:
-selection → rectangles per page, the comment editor (`ui/comment.rs`), the
-panel (`ui/annotations.rs`), markers and hover tooltips, the quit/reload
-guards.
+Sticky notes are `Text` annotations and text boxes `FreeText` annotations
+(Helvetica, the colour and size in the default appearance; MuPDF draws them).
+A text box's height always follows its text: `text_box_height` mirrors
+MuPDF's line breaking (1.2 line height, breaks at spaces), and the box is
+refitted after every change to its text, size or width, so undo restores it.
+`app/redact.rs` has marking (selection, search matches) and the result
+handling. `app/place.rs` is placement mode (`Mode::Place`): a box moved and
+resized with the keyboard or the mouse, which becomes a redaction area (`X`),
+a note (`C`), a text box (`T`), or the new place of an existing one.
+`app/annotations.rs` holds the UI side of annotations: selection → rectangles
+per page, the comment editor (`ui/comment.rs`), the panel
+(`ui/annotations.rs`), comment bubbles, hover outlines and tooltips, the
+quit/reload guards. `app/visual.rs` turns a press on a bubble, note or text
+box into an edit (click) or a move (drag), and builds the right-click menu.
 
 ## Menus
 
@@ -225,7 +235,8 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `platform.rs` | Files opened from the system (macOS `application:openURLs:`), temporary-folder checks, the private temp dir |
 | `annotate.rs` | Annotation editor thread: highlights, comments, redaction marks, undo, saving |
 | `app/annotations.rs`, `ui/annotations.rs`, `ui/comment.rs` | Annotations UI |
-| `app/redact.rs` | Redaction marks, area mode, applying |
+| `app/redact.rs` | Redaction marks, applying |
+| `app/place.rs` | Placement mode: redaction areas, notes, text boxes, moving |
 | `ui/menubar.rs`, `app/menu.rs` | Menu bar: widget + keyboard navigation, contents |
 | `welcome.rs` | The page shown when no document is open |
 | `scripts/` | App bundle and icon generation (macOS), install with desktop entry (Linux) |

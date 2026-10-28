@@ -12,7 +12,8 @@ link hints, jumplist and marks, text selection with vim visual mode and the
 mouse, recolor (dark mode), outline panel, remembered positions, auto-reload,
 a macOS app bundle and a Linux desktop entry that make it the default PDF
 viewer (Finder, file managers, Firefox),
-highlights and comments saved into the PDF, and redaction (censoring).
+highlights, comments, sticky notes and text boxes saved into the PDF, and
+redaction (censoring).
 
 Most things are reachable three ways: a vim-style key, the `:` command line,
 and the File / Edit / View menus (which show each entry's key, and are
@@ -143,6 +144,8 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `<C-a>` | Annotations panel (all highlights, comments and redaction marks) |
 | `u` | Undo the last annotation change |
 | `X` | Mark an area for redaction (see Redaction) |
+| `C` | Add a sticky note (see Highlights, comments, notes and text) |
+| `T` | Add a text box, written on the page |
 | `:` | Command line |
 | `gm` | Open the menu bar (File / Edit / View) — see Menus |
 | `?` | Help overlay: active keys, mouse actions, commands. Your scroll keys (`j`/`k`, `<C-d>`/`<C-u>`, `gg`/`G`, counts…) scroll it; `?`, `Esc` or `q` close it |
@@ -290,10 +293,10 @@ Known limitations:
   don't map back to sensible characters (e.g. `410þ160 −180` for 410⁺¹⁶⁰₋₁₈₀).
 - Scanned PDFs without a text layer have nothing to select or search.
 
-### Highlights and comments
+### Highlights, comments, notes and text
 
-Highlights and comments are standard PDF annotations, so Preview, Acrobat,
-Zotero and other viewers show them too.
+These are standard PDF annotations, so Preview, Acrobat, Okular, Zotero and
+other viewers show them too.
 
 - Select text (`v` + motions, `/` then `v`, `gv`, or the mouse), then
   `a<letter>` highlights it in that colour: `y` yellow, `g` green, `b` blue,
@@ -301,14 +304,31 @@ Zotero and other viewers show them too.
   `aa` uses the last colour again.
 - `c` on a selection opens a comment box: Enter saves (the selection is
   highlighted with the comment), Shift+Enter starts a new line, Esc cancels.
-  A dot marks highlights that carry a comment; hover it to read the comment.
+  A speech bubble next to the line marks a highlight with a comment: hover it
+  (or the highlight) to read the comment, click it to edit.
+- **Sticky notes** go anywhere on the page: `C` puts a note icon in the middle
+  of the view; `h`/`j`/`k`/`l` move it (counts work: `10l`), Enter opens the
+  box for its text, Esc cancels. Hover a note to read it, click it to edit.
+- **Text boxes** are written on the page itself: `T` places a box (`H`/`L`
+  change its width, `+`/`-` the font size), Enter opens the box for the text.
+  The text wraps at the box's width and the box grows to fit it. Size and
+  colour of new boxes: `[text]` in the config.
+- Placing works with the mouse too: drag the box to move it, drag elsewhere
+  to draw a new one, double-click to confirm. Or right-click anywhere on a
+  page → Add note here / Add text here.
+- Notes and text boxes can be dragged to another place with the mouse, or
+  moved from the keyboard with `m` in the annotations panel.
 - `<C-a>` opens the annotations panel: every annotation in document order with
   its page, the text it covers and its comment. `j`/`k` move, Enter jumps to
-  it, `e` edits the comment, `c<letter>` changes the colour, `d` deletes, `u`
-  undoes, Esc closes.
+  it, `e` edits the comment (or the note's / text box's text), `c<letter>`
+  changes the colour, `m` moves a note, text box or redaction mark, `+`/`-`
+  change a text box's font size, `d` deletes, `u` undoes, Esc closes.
+- **Deleting a comment:** to keep the highlight, right-click it → Remove
+  comment (or edit the comment and clear it); `d` in the panel, or
+  right-click → Delete, removes the highlight together with its comment.
 - With the mouse: right-click a selection for Highlight (with each colour)
-  and Comment…; right-click an annotation to edit its comment, change its
-  colour or delete it.
+  and Comment…; right-click an annotation to edit it, remove its comment,
+  move it, change its colour or text size, or delete it.
 - `u` undoes the last annotation change (repeatedly).
 - Changes are kept in memory until `:w`, which writes them into the PDF as an
   incremental update (the original bytes stay unchanged; the update is

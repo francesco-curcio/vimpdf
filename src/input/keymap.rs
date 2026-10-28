@@ -239,6 +239,8 @@ impl Keymap {
             ("u", Undo),
             ("<C-a>", ToggleAnnotations),
             ("X", RedactArea),
+            ("C", PlaceNote),
+            ("T", PlaceText),
             ("gm", OpenMenu),
             ("<F10>", OpenMenu),
         ] {

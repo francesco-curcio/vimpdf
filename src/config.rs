@@ -87,6 +87,9 @@ pub struct Config {
     pub highlight_default: char,
     /// Author written into new annotations; empty means the login name.
     pub author: String,
+    /// Font size and colour of new text boxes.
+    pub text_size: f32,
+    pub text_color: Color,
     /// Key binding overrides, in file order.
     pub normal_keys: Vec<(String, String)>,
     pub visual_keys: Vec<(String, String)>,
@@ -135,6 +138,8 @@ impl Default for Config {
             .collect(),
             highlight_default: 'y',
             author: String::new(),
+            text_size: 12.0,
+            text_color: c("#c92a2a"),
             normal_keys: Vec::new(),
             visual_keys: Vec::new(),
         }
@@ -169,6 +174,8 @@ pub const OPTIONS: &[&str] = &[
     "highlight.colors",
     "highlight.default",
     "highlight.author",
+    "text.size",
+    "text.color",
 ];
 
 fn as_bool(v: &Value) -> Result<bool, String> {
@@ -386,6 +393,8 @@ impl Config {
                 }
             }
             "highlight.author" => self.author = as_str(v)?.to_owned(),
+            "text.size" => self.text_size = as_num(v, 4.0, 72.0)?,
+            "text.color" => self.text_color = as_color(v)?,
             _ => return Err("unknown option".into()),
         }
         Ok(())

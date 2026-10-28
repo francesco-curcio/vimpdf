@@ -23,6 +23,7 @@ use crate::viewport::{FitMode, Viewport};
 mod annotations;
 mod hints;
 mod menu;
+mod place;
 mod reading;
 mod redact;
 mod searching;
@@ -30,8 +31,8 @@ mod visual;
 
 use annotations::Annotations;
 use hints::HintState;
+use place::Placing;
 use reading::{OutlineState, Persistence};
-use redact::AreaState;
 use visual::{ContextMenu, Drag};
 
 const BACKGROUND: Color32 = Color32::from_gray(40);
@@ -83,7 +84,7 @@ pub struct VimpdfApp {
     persist: Persistence,
     annots: Annotations,
     /// The rectangle being placed in redact-area mode.
-    area: Option<AreaState>,
+    placing: Option<Placing>,
     menu_state: ui::menubar::MenuState,
     /// Mode to return to when a menu closes.
     menu_return: Mode,
@@ -137,7 +138,7 @@ impl VimpdfApp {
             outline: OutlineState::default(),
             persist: Persistence::default(),
             annots: Annotations::default(),
-            area: None,
+            placing: None,
             menu_state: Default::default(),
             menu_return: Mode::Normal,
             show_props: false,
@@ -494,6 +495,22 @@ impl VimpdfApp {
             Command::ForceQuit => self.force_quit(ctx),
             Command::RedactSelection => self.redact_selection(),
             Command::RedactArea => self.start_redact_area(),
+            Command::PlaceNote => {
+                let color = self.note_color();
+                self.start_placing(place::Purpose::Note { color });
+            }
+            Command::PlaceText => {
+                let color = self.text_color();
+                let size = self.config.text_size;
+                self.start_placing(place::Purpose::Text { size, color });
+            }
+            Command::AddNoteAt { page, x, y } => self.add_note_at(page, x, y),
+            Command::AddTextAt { page, x, y } => self.add_text_at(page, x, y),
+            Command::MoveAnnot { page, xref } => self.start_moving(page, xref),
+            Command::AnnotFontSize { page, xref, bigger } => {
+                self.annot_font_size(page, xref, bigger);
+            }
+            Command::RemoveComment { page, xref } => self.remove_comment(page, xref),
             Command::RedactMatches => self.redact_matches(),
             Command::ApplyRedactions(path) => self.apply_redactions(path),
             Command::OpenMenu => self.open_menu(),
@@ -648,10 +665,10 @@ impl VimpdfApp {
                 .filter_map(|tok| self.menu_key(tok))
                 .collect();
         }
-        if self.mode == Mode::RedactArea {
+        if self.mode == Mode::Place {
             let events = ctx.input(|i| i.events.clone());
             for tok in key_tokens(&events) {
-                self.area_key(&tok);
+                self.place_key(&tok);
             }
             return Vec::new();
         }
@@ -798,12 +815,12 @@ impl eframe::App for VimpdfApp {
         // Input → commands.
         let mut commands = self.keyboard_commands(&ctx);
         let mut cursor = egui::CursorIcon::Default;
-        if self.mode == Mode::RedactArea && !ctx.egui_wants_pointer_input() {
-            self.area_mouse(&ctx, area);
+        if self.mode == Mode::Place && !ctx.egui_wants_pointer_input() {
+            self.place_mouse(&ctx, area);
             let hover = ctx
                 .input(|i| i.pointer.hover_pos())
                 .filter(|p| area.contains(*p));
-            if let Some(c) = self.area_hover_cursor(hover) {
+            if let Some(c) = self.place_hover_cursor(hover) {
                 cursor = c;
             }
         } else if !ctx.egui_wants_pointer_input() && self.menu.is_none() {
@@ -880,6 +897,7 @@ impl eframe::App for VimpdfApp {
         self.draw_search_highlights(&painter, area, &vp);
         self.draw_annotation_markers(&ctx, &painter, area, &vp);
         self.draw_redactions(&painter, area, &vp);
+        self.draw_placing(&painter, area, &vp);
         self.draw_selection(&painter, area, &vp);
         self.draw_hints(&painter, area, &vp);
 
@@ -929,10 +947,10 @@ impl eframe::App for VimpdfApp {
                 }
                 let linewise = self.selection.is_some_and(|s| s.linewise);
                 let status = statusbar::Status {
-                    mode: if self.mode == Mode::Visual && linewise {
-                        "V-LINE"
-                    } else {
-                        self.mode.label()
+                    mode: match (&self.placing, self.mode) {
+                        (_, Mode::Visual) if linewise => "V-LINE",
+                        (Some(pl), Mode::Place) => pl.purpose.label(),
+                        _ => self.mode.label(),
                     },
                     file: &file,
                     page,
