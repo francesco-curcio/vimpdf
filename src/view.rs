@@ -30,7 +30,20 @@ const PAGE_GAP: f32 = 8.0;
 /// After the zoom changes, wait this long for it to settle before rendering
 /// at the new scale (the old tiles are drawn scaled meanwhile).
 const RERENDER_DELAY: Duration = Duration::from_millis(150);
-const CACHE_BUDGET: usize = 512 * 1024 * 1024;
+/// The rendered tiles kept (in GPU memory) are what the view and its
+/// prefetch need, with room for the previous zoom's tiles while new ones
+/// render and for scrolling back a little: 1.5 times the plan, within these
+/// bounds.
+const MIN_CACHE: usize = 48 * 1024 * 1024;
+const MAX_CACHE: usize = 256 * 1024 * 1024;
+
+fn cache_budget(plan: &[RenderJob]) -> usize {
+    let needed: usize = plan
+        .iter()
+        .map(|j| (j.rect.w * j.rect.h) as usize * 4)
+        .sum();
+    (needed * 3 / 2).clamp(MIN_CACHE, MAX_CACHE)
+}
 
 pub struct DocView {
     pub path: PathBuf,
@@ -89,7 +102,7 @@ impl DocView {
             fingerprint: info.fingerprint.clone(),
             path,
             renderer,
-            textures: LruCache::new(CACHE_BUDGET),
+            textures: LruCache::new(MIN_CACHE),
             failed: HashSet::new(),
             last_queue: Vec::new(),
             scale: None,
@@ -199,17 +212,18 @@ impl DocView {
             ctx.request_repaint_after(RERENDER_DELAY - since);
             Vec::new()
         } else {
-            tiles::plan(
+            let plan = tiles::plan(
                 &self.layout,
                 &self.generations,
                 vp,
                 scale,
                 recolor,
                 scrolling_up,
-            )
-            .into_iter()
-            .filter(|j| !self.textures.contains(j) && !self.failed.contains(j))
-            .collect()
+            );
+            self.textures.set_budget(cache_budget(&plan));
+            plan.into_iter()
+                .filter(|j| !self.textures.contains(j) && !self.failed.contains(j))
+                .collect()
         };
         if jobs != self.last_queue {
             self.renderer.set_queue(jobs.iter().copied());
@@ -334,6 +348,58 @@ fn snap_to_pixels(pos: Pos2, ppp: f32) -> Pos2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Scroll a 36-page paper at fit width in a 2690×1570 px window, top to
+    /// bottom and back, the way `schedule` and `receive_results` fill the
+    /// cache. Returns the peak bytes held.
+    fn simulate_reading() -> usize {
+        let sizes = vec![
+            crate::document::PageSize {
+                width: 612.0,
+                height: 792.0,
+                origin_x: 0.0,
+                origin_y: 0.0,
+            };
+            36
+        ];
+        let layout = Layout::new(&sizes, PAGE_GAP);
+        let generations = vec![0; 36];
+        let mut vp = Viewport::new(2690.0, 1570.0);
+        vp.fit_width(&layout, 16.0);
+        let scale = ScaleKey::from_scale(vp.zoom);
+        let mut cache: LruCache<RenderJob, ()> = LruCache::new(MIN_CACHE);
+        let mut peak = 0;
+        let end = layout.height() - vp.doc_height();
+        let step = vp.doc_height() / 4.0;
+        let mut ys: Vec<f32> = (0..)
+            .map(|i| i as f32 * step)
+            .take_while(|y| *y < end)
+            .collect();
+        let back: Vec<f32> = ys.iter().rev().copied().collect();
+        let down = ys.len();
+        ys.extend(back);
+        for (i, y) in ys.into_iter().enumerate() {
+            vp.y = y;
+            let plan = tiles::plan(&layout, &generations, &vp, scale, None, i >= down);
+            cache.set_budget(cache_budget(&plan));
+            for job in plan {
+                if !cache.contains(&job) {
+                    cache.insert(job, (), (job.rect.w * job.rect.h * 4) as usize);
+                }
+            }
+            peak = peak.max(cache.used_bytes());
+        }
+        peak
+    }
+
+    #[test]
+    fn reading_a_paper_keeps_the_tile_cache_small() {
+        let peak = simulate_reading();
+        eprintln!("SIM peak tile cache: {} MiB", peak / (1024 * 1024));
+        // It was 512 MiB (the whole old budget) before the cache followed
+        // the plan.
+        assert!(peak <= 128 * 1024 * 1024, "{} MiB", peak / (1024 * 1024));
+    }
 
     #[test]
     fn snap_to_pixels_aligns_on_retina() {

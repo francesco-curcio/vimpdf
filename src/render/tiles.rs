@@ -11,10 +11,10 @@ use super::{Recolor, RenderJob, ScaleKey};
 pub const TILE_SIZE: u32 = 1024;
 
 /// How far beyond the view to prefetch, in view heights.
-const AHEAD_SCREENS: f32 = 3.0;
-const BEHIND_SCREENS: f32 = 0.75;
+const AHEAD_SCREENS: f32 = 2.0;
+const BEHIND_SCREENS: f32 = 0.5;
 /// Extra width rendered left and right of the view, in view widths.
-const SIDE_SCREENS: f32 = 0.5;
+const SIDE_SCREENS: f32 = 0.25;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TileId {

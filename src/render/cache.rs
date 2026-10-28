@@ -26,6 +26,12 @@ impl<K: Eq + Hash + Clone, V> LruCache<K, V> {
         }
     }
 
+    /// Change the budget, evicting least-recently-used entries if over it.
+    pub fn set_budget(&mut self, budget_bytes: usize) {
+        self.budget = budget_bytes;
+        self.evict_except(None);
+    }
+
     /// Insert, then evict least-recently-used entries until within budget.
     /// The new entry itself is never evicted.
     pub fn insert(&mut self, key: K, value: V, size: usize) {
@@ -41,12 +47,15 @@ impl<K: Eq + Hash + Clone, V> LruCache<K, V> {
             self.used -= old.size;
         }
         self.used += size;
+        self.evict_except(Some(&key));
+    }
 
-        while self.used > self.budget && self.map.len() > 1 {
+    fn evict_except(&mut self, keep: Option<&K>) {
+        while self.used > self.budget && !self.map.is_empty() {
             let oldest = self
                 .map
                 .iter()
-                .filter(|(k, _)| **k != key)
+                .filter(|(k, _)| Some(*k) != keep)
                 .min_by_key(|(_, e)| e.last_used)
                 .map(|(k, _)| k.clone());
             let Some(oldest) = oldest else { break };
@@ -111,6 +120,18 @@ mod tests {
         c.insert("big", 2, 50);
         assert!(c.contains(&"big"));
         assert_eq!(c.len(), 1);
+    }
+
+    #[test]
+    fn lowering_the_budget_evicts_the_oldest() {
+        let mut c = LruCache::new(100);
+        c.insert("a", 1, 40);
+        c.insert("b", 2, 40);
+        c.get(&"a");
+        c.set_budget(50);
+        assert!(c.contains(&"a"));
+        assert!(!c.contains(&"b"));
+        assert_eq!(c.used_bytes(), 40);
     }
 
     #[test]

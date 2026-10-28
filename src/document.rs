@@ -291,7 +291,7 @@ pub struct PixelRect {
 
 /// Display lists kept per renderer: rendering several tiles of one page then
 /// interprets the page's content only once.
-const DISPLAY_LISTS: usize = 6;
+const DISPLAY_LISTS: usize = 3;
 
 /// Renders regions of pages. Owns its `Document`, so one per thread.
 pub struct PageRenderer {
