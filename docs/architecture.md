@@ -222,13 +222,13 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `watch.rs` | File change notifications |
 | `app/reading.rs` | Recolor, outline keys, state save/restore, auto-reload |
 | `ui/outline.rs` | Outline panel |
-| `platform.rs` | Files opened from the system (macOS `application:openURLs:`) |
+| `platform.rs` | Files opened from the system (macOS `application:openURLs:`), temporary-folder checks, the private temp dir |
 | `annotate.rs` | Annotation editor thread: highlights, comments, redaction marks, undo, saving |
 | `app/annotations.rs`, `ui/annotations.rs`, `ui/comment.rs` | Annotations UI |
 | `app/redact.rs` | Redaction marks, area mode, applying |
 | `ui/menubar.rs`, `app/menu.rs` | Menu bar: widget + keyboard navigation, contents |
 | `welcome.rs` | The page shown when no document is open |
-| `scripts/` | App bundle and icon generation (macOS) |
+| `scripts/` | App bundle and icon generation (macOS), install with desktop entry (Linux) |
 | `selection.rs` | Text positions, caret motions, selections, clean copying |
 | `app/hints.rs`, `app/searching.rs`, `app/visual.rs` | App-side hint mode, search, visual mode and mouse selection |
 | `config.rs` | Options, TOML loading, `:set` |

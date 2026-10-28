@@ -29,9 +29,42 @@ fn normalize(name: &str) -> String {
         .collect()
 }
 
-/// Find a font file whose name matches `family` ("Menlo" → Menlo.ttc,
-/// "JetBrains Mono" → JetBrainsMono-Regular.ttf).
+/// Find the font file for `family`. `"monospace"` is the system's monospace
+/// font (Menlo on macOS, fontconfig's choice elsewhere). Other names are
+/// asked of fontconfig where it exists, then matched against file names
+/// ("Menlo" → Menlo.ttc, "JetBrains Mono" → JetBrainsMono-Regular.ttf).
 pub fn find_font(family: &str) -> Option<PathBuf> {
+    let generic = normalize(family) == "monospace";
+    if generic && cfg!(target_os = "macos") {
+        return find_file("Menlo");
+    }
+    fontconfig(family, generic).or_else(|| find_file(family))
+}
+
+/// Ask `fc-match` for `family`. fc-match always answers with some font, so
+/// unless the name is generic the answer must be the family asked for.
+fn fontconfig(family: &str, generic: bool) -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        return None;
+    }
+    let out = std::process::Command::new("fc-match")
+        .args(["--format", "%{family}\n%{file}", family])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let out = String::from_utf8_lossy(&out.stdout);
+    let (families, file) = out.split_once('\n')?;
+    let want = normalize(family);
+    if !generic && !families.split(',').any(|f| normalize(f) == want) {
+        return None;
+    }
+    let file = PathBuf::from(file.trim());
+    let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let usable = matches!(ext.to_ascii_lowercase().as_str(), "ttf" | "otf" | "ttc");
+    (usable && file.is_file()).then_some(file)
+}
+
+fn find_file(family: &str) -> Option<PathBuf> {
     let want = normalize(family);
     let mut best: Option<(u8, PathBuf)> = None;
     for dir in font_dirs() {
@@ -105,5 +138,25 @@ mod tests {
     fn finds_menlo_on_macos() {
         let path = find_font("Menlo").expect("Menlo ships with macOS");
         assert!(path.to_string_lossy().contains("Menlo"));
+    }
+
+    #[test]
+    fn finds_a_monospace_font() {
+        // Needs a font installed (always on macOS; fontconfig elsewhere).
+        if cfg!(target_os = "macos") || which("fc-match") {
+            assert!(find_font("monospace").is_some());
+        }
+    }
+
+    #[test]
+    fn missing_family_is_not_replaced_by_a_fallback() {
+        assert!(find_font("No Such Font Family 42").is_none());
+    }
+
+    fn which(program: &str) -> bool {
+        std::process::Command::new(program)
+            .arg("--version")
+            .output()
+            .is_ok()
     }
 }

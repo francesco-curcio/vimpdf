@@ -69,7 +69,7 @@ pub fn pdf_bytes() -> Vec<u8> {
 }
 
 fn path() -> PathBuf {
-    std::env::temp_dir().join("vimpdf-welcome.pdf")
+    crate::platform::private_temp_dir().join("vimpdf-welcome.pdf")
 }
 
 /// Whether `path` (canonical) is the welcome page.

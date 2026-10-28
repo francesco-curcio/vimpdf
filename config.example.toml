@@ -3,7 +3,7 @@
 # Full reference: docs/configuration.md
 
 [ui]
-font_family = "Menlo"
+font_family = "monospace"   # the system monospace font; or e.g. "Menlo", "JetBrains Mono"
 font_size = 14
 statusbar = true
 menubar = true        # File / Edit / View menus; gm opens them even when hidden

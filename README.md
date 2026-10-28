@@ -10,7 +10,8 @@ continuous scrolling, vim motions with counts, links, zoom and fit modes,
 status bar, `:` command line, config file, toolbar, help overlay, search,
 link hints, jumplist and marks, text selection with vim visual mode and the
 mouse, recolor (dark mode), outline panel, remembered positions, auto-reload,
-a macOS app bundle that can be the default PDF viewer (Finder, Firefox),
+a macOS app bundle and a Linux desktop entry that make it the default PDF
+viewer (Finder, file managers, Firefox),
 highlights and comments saved into the PDF, and redaction (censoring).
 
 Most things are reachable three ways: a vim-style key, the `:` command line,
@@ -26,7 +27,7 @@ Documentation:
 
 ## Building
 
-Requirements (macOS — the tested platform):
+Requirements on macOS:
 
 - Xcode Command Line Tools (`xcode-select --install`), needed to compile MuPDF.
 - Rust stable via [rustup](https://rustup.rs/). On Apple Silicon make sure the
@@ -37,31 +38,39 @@ Requirements (macOS — the tested platform):
 cargo build --release
 ```
 
-### Linux (untested)
+### Linux
 
-vimpdf is developed and tested on macOS (Apple Silicon). It is written to be
-portable — macOS-only code is compiled only on macOS, links open with
-`xdg-open`, config and state follow the XDG directories, fonts are looked up
-in the usual Linux folders — but **it has not been built or run on Linux
-yet**. Reports and fixes are welcome.
-
-What it will most likely need (a best guess, not verified), on Debian/Ubuntu:
+Builds, passes the tests and runs on Arch Linux (CachyOS), under Wayland
+(KDE Plasma) and X11 (XWayland).
+Building needs a C/C++ compiler, `make` and libclang (MuPDF is compiled from
+source and its bindings are generated with bindgen):
 
 ```sh
-sudo apt install build-essential clang pkg-config libfontconfig-dev \
-    libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+sudo pacman -S base-devel clang                 # Arch
+sudo apt install build-essential libclang-dev   # Debian/Ubuntu
+sudo dnf install gcc gcc-c++ make clang-devel   # Fedora
 ```
 
-and on Fedora:
+Rust via [rustup](https://rustup.rs/), then `cargo build --release` as above.
+At run time vimpdf loads the usual desktop libraries itself (Wayland or X11,
+libxkbcommon, OpenGL, fontconfig); any desktop install has them.
+
+To install it with a menu entry and icon, and register it as a PDF viewer
+(so it appears in "Open With" and can be picked by browsers):
 
 ```sh
-sudo dnf install gcc gcc-c++ clang pkgconf fontconfig-devel \
-    libxkbcommon-devel wayland-devel libX11-devel libXcursor-devel libXrandr-devel libXi-devel mesa-libGL-devel
+scripts/install-linux.sh             # ~/.local/bin/vimpdf + ~/.local/share/applications/vimpdf.desktop
+scripts/install-linux.sh --default   # …and make it the default PDF viewer (xdg-mime)
 ```
 
-then `cargo build --release` as above. The macOS app bundle and the Finder /
-Firefox integration are macOS-only; on Linux run `vimpdf file.pdf` or use a
-`.desktop` file.
+Differences from macOS: `Ctrl` takes the place of `Cmd` (`Ctrl` + wheel
+zooms, `Ctrl+C` copies); trackpad pinch-to-zoom isn't available (winit only
+delivers pinch gestures on macOS), use `Ctrl` + wheel or `+`/`-`; and every
+file opened from outside starts its own window rather than replacing the
+document in a running one. Dropping a PDF on the window works under X11 but
+not Wayland (winit doesn't support it there yet); use `:open`. In Firefox, choose vimpdf under Settings →
+General → Applications → "Portable Document Format (PDF)" (after
+`--default`, "Use system default" does it).
 
 The first build compiles MuPDF from source and takes a minute or two.
 
@@ -152,7 +161,7 @@ Every mouse action also has a key.
 | Mouse | Action | Key equivalent |
 | --- | --- | --- |
 | Wheel / two-finger scroll | Scroll | `j` `k` `h` `l` |
-| Pinch, or `Cmd` + wheel | Zoom, anchored at the pointer | `+` `-` |
+| Pinch, or `Cmd` + wheel (`Ctrl` + wheel on Linux) | Zoom, anchored at the pointer | `+` `-` |
 | Click a link | Follow it | `f` + label |
 | Drag over text | Select it | `v` + motions |
 | Double / triple click | Select a word / a line | `gv` + label, `V` |
@@ -261,7 +270,7 @@ visual mode, so you can refine it from the keyboard (and vice versa with
 | `<C-d>` `<C-u>` `<C-f>` `<C-b>` | Scroll; the caret moves with the view |
 | `o` | Swap caret and anchor |
 | `v` / `V` | Switch char-wise / line-wise, or leave |
-| `y`, `Cmd+C` | Copy and leave visual mode |
+| `y`, `Cmd+C` (`Ctrl+C` on Linux) | Copy and leave visual mode |
 | `*` | Search for the selected text |
 | `/`, `n`, `N` | Search; the caret moves to the match |
 | `Esc` | Leave visual mode |

@@ -31,8 +31,13 @@ Deviations from sections 2–3:
   `state.rs`, `watch.rs`, `platform.rs`, `welcome.rs`, and `app.rs` is split
   into `app/hints.rs`, `app/searching.rs`, `app/visual.rs`, `app/reading.rs`.
 
-Linux has not been built or tested (the README says so and lists the probable
-build dependencies as a best guess). Not yet checked by a human: the visual appearance (bars, help, outline panel,
+Linux (2026-10-28): builds, passes the tests and runs on Arch Linux under
+Wayland and X11. Fixes needed: font-kit's fontconfig loading (feature
+unification with egui's fontique), the UI font default (`"monospace"`, via
+fontconfig), private temp files (`$XDG_RUNTIME_DIR` instead of the shared
+`/tmp`), the Wayland app id, and `scripts/install-linux.sh` (desktop entry,
+icon, default PDF viewer). Not available on Linux with winit 0.30: pinch
+zoom, file drop on Wayland; opening a file from outside starts a new window. Not yet checked by a human: the visual appearance (bars, help, outline panel,
 highlight colours, recolor), pinch-to-zoom on a real trackpad, and choosing
 vimpdf inside Firefox's settings. Known limitations are listed per milestone
 and in the README.

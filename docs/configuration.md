@@ -19,7 +19,7 @@ unambiguous (`toolbar`). Booleans also accept `:set toolbar` / `:set notoolbar`.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `font_family` | `"Menlo"` | Font of the status bar, command line and help. Looked up by file name in the system and user font folders (`"JetBrains Mono"` finds `JetBrainsMono-Regular.ttf`). Falls back to egui's built-in monospace font with a warning. |
+| `font_family` | `"monospace"` | Font of the status bar, command line and help. `"monospace"` is the system's monospace font (Menlo on macOS, fontconfig's choice on Linux). Other names are looked up with fontconfig (Linux), then by file name in the system and user font folders (`"JetBrains Mono"` finds `JetBrainsMono-Regular.ttf`). Falls back to egui's built-in monospace font with a warning. |
 | `font_size` | `14` | Size of that font, 6–72. Also scales the bars. |
 | `statusbar` | `true` | Show the status bar. |
 | `toolbar` | `false` | Show the toolbar (`<C-t>` toggles it). |

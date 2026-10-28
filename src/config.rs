@@ -96,7 +96,7 @@ impl Default for Config {
     fn default() -> Self {
         let c = |s| Color::parse(s).expect("valid default colour");
         Self {
-            font_family: "Menlo".into(),
+            font_family: "monospace".into(),
             font_size: 14.0,
             statusbar: true,
             toolbar: false,

@@ -5,7 +5,10 @@ use crate::input::keymap::Keymap;
 
 const MOUSE: &[(&str, &str)] = &[
     ("wheel / two-finger scroll", "scroll (j k h l)"),
+    #[cfg(target_os = "macos")]
     ("pinch, Cmd + wheel", "zoom at the pointer (+ -)"),
+    #[cfg(not(target_os = "macos"))]
+    ("Ctrl + wheel", "zoom at the pointer (+ -)"),
     ("click a link", "follow it (f)"),
     ("drag over text", "select (v + motions)"),
     ("double / triple click", "select word / line (gv, V)"),

@@ -88,6 +88,8 @@ fn run(args: Args) -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("vimpdf")
+            // Wayland app id / X11 class: matches vimpdf.desktop, for the icon.
+            .with_app_id("vimpdf")
             .with_inner_size([900.0, 1100.0])
             .with_maximized(config.start_maximised)
             .with_active(true),

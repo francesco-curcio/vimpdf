@@ -22,3 +22,9 @@ winit = "0.30.13"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSURL", "NSString", "NSObject"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
+
+# egui's font loader (fontique) turns on yeslogic-fontconfig-sys's `dlopen`
+# feature; mupdf's font-kit then has to load fontconfig the same way, or it
+# doesn't compile (feature unification).
+[target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]
+font-kit = { version = "0.14", default-features = false, features = ["source-fontconfig-dlopen"] }

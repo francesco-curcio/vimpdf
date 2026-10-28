@@ -31,6 +31,20 @@ pub fn is_temporary(path: &std::path::Path) -> bool {
         .any(|p| path.starts_with(p))
 }
 
+/// Where our own temporary files go (welcome page, annotation working
+/// copies). macOS's temp dir is already private to the user; elsewhere it's
+/// usually the shared `/tmp`, so prefer `$XDG_RUNTIME_DIR`, which isn't.
+pub fn private_temp_dir() -> PathBuf {
+    #[cfg(not(target_os = "macos"))]
+    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|d| d.is_absolute() && d.is_dir())
+    {
+        return dir;
+    }
+    std::env::temp_dir()
+}
+
 /// Paths opened since the last call, oldest first.
 pub fn take_opened() -> Vec<PathBuf> {
     std::mem::take(&mut *OPENED.lock().expect("lock"))

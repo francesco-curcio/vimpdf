@@ -221,11 +221,11 @@ struct EditorState {
     unsaved_other: bool,
 }
 
-/// Working copies live in `<temp>/vimpdf-work/<pid>-<n>`: one folder per
+/// Working copies live in `<private temp>/vimpdf-work/<pid>-<n>`: one folder per
 /// editing session (each opened document), so sessions never clean up each
 /// other's files.
 fn work_root() -> PathBuf {
-    std::env::temp_dir().join("vimpdf-work")
+    crate::platform::private_temp_dir().join("vimpdf-work")
 }
 
 fn new_work_dir() -> PathBuf {
@@ -794,7 +794,9 @@ mod tests {
     #[test]
     #[ignore = "needs VIMPDF_ANNOT_DUMP"]
     fn dump_annotations() {
-        let path = std::env::var("VIMPDF_ANNOT_DUMP").expect("set VIMPDF_ANNOT_DUMP");
+        let Ok(path) = std::env::var("VIMPDF_ANNOT_DUMP") else {
+            return;
+        };
         for a in EditorState::open(Path::new(&path), "x".into())
             .unwrap()
             .read_all()
