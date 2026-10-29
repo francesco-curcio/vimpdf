@@ -160,7 +160,9 @@ impl VimpdfApp {
     }
 
     /// The cursor to show over the pages: none once the mouse has been
-    /// still for `mouse.hide_after` seconds, so it doesn't sit on the text.
+    /// still for `mouse.hide_after` seconds, whatever its shape (arrow, text
+    /// caret, hand), so it doesn't sit on the text. A held button counts as
+    /// moving, so drags keep it.
     pub(super) fn hide_idle_pointer(
         &mut self,
         ctx: &egui::Context,
@@ -183,7 +185,7 @@ impl VimpdfApp {
         }
         let after = self.config.hide_pointer_after;
         let over_pages = pos.is_some_and(|p| area.contains(p)) && !ctx.egui_wants_pointer_input();
-        if after <= 0.0 || !over_pages || cursor != egui::CursorIcon::Default {
+        if after <= 0.0 || !over_pages {
             return cursor;
         }
         let idle = self.pointer_active.elapsed();
