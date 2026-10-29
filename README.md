@@ -157,7 +157,7 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `:` | Command line |
 | `gm` | Open the menu bar (File / Edit / View) — see Menus |
 | `?` | Help overlay: active keys, mouse actions, commands. Your scroll keys (`j`/`k`, `<C-d>`/`<C-u>`, `gg`/`G`, counts…) scroll it; `?`, `Esc` or `q` close it |
-| `<Tab>` | Outline (table of contents) panel |
+| `<Tab>` | Outline (table of contents) panel. Inside it: `j`/`k`, Enter to jump, `p` to keep it open beside the pages (`<Tab>` then moves the keys between it and the pages), `<`/`>` to make it narrower or wider, `Esc` to leave it. Long titles wrap |
 | `<C-r>` | Toggle recolor (dark mode) |
 | `<C-t>` | Toggle the toolbar |
 | `<C-F>` | Toggle fullscreen |
@@ -167,7 +167,8 @@ Press `?` in the viewer for the list of the bindings that are actually active
 
 ### Mouse and trackpad
 
-Every mouse action also has a key.
+Every mouse action also has a key. The pointer hides over the pages after
+two idle seconds (`mouse.hide_after`) and comes back when the mouse moves.
 
 | Mouse | Action | Key equivalent |
 | --- | --- | --- |
@@ -181,6 +182,7 @@ Every mouse action also has a key.
 | Right click | Menu: copy, search for selection, highlight, comment, open link, copy link address; on an annotation: edit comment, change colour, delete | `y`, `*`, `a<letter>`, `c`, `f`, `yf`; `<C-a>` then `e`, `c<letter>`, `d` |
 | Click the page number in the status bar | Go to page | `:<n>` |
 | Click an outline entry | Jump to it (panel stays open) | `<Tab>`, `j`/`k`, Enter |
+| Drag the outline's right edge | Resize it | `<` `>` in the outline |
 | Toolbar buttons | Zoom, fit, go to page, help | `+` `-` `s` `a` `:<n>` `?` |
 
 Internal links jump to the exact destination (a citation lands on the

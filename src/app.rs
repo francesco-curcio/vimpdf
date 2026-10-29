@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align2, Color32, FontId, Rect, Vec2, ViewportCommand};
 
-use crate::config::{Color, Config};
+use crate::config::{Color, Config, OUTLINE_MIN_WIDTH};
 use crate::document::DocInfo;
 use crate::input::command::{Command, parse_ex};
 use crate::input::keymap::{KeyState, Keymap};
@@ -91,6 +91,8 @@ pub struct VimpdfApp {
     /// Mode to return to when a menu closes.
     menu_return: Mode,
     show_props: bool,
+    /// When the mouse last moved, to hide an idle pointer.
+    pointer_active: Instant,
 }
 
 impl VimpdfApp {
@@ -144,6 +146,7 @@ impl VimpdfApp {
             placing: None,
             menu_state: Default::default(),
             menu_return: Mode::Normal,
+            pointer_active: Instant::now(),
             show_props: false,
         };
         app.install_font(ctx, &mut warnings);
@@ -470,6 +473,7 @@ impl VimpdfApp {
                 self.info(format!("Recolor {state}"));
             }
             Command::ToggleOutline => self.toggle_outline(),
+            Command::PinOutline => self.pin_outline(),
             Command::ToggleFullscreen => {
                 let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
                 ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!full));
@@ -810,6 +814,18 @@ impl eframe::App for VimpdfApp {
             Rect::from_min_size(area.left_bottom(), Vec2::new(area.width(), h))
         });
 
+        // The outline: pinned, it takes a strip on the left and the pages
+        // move right; opened with <Tab> only, it covers the pages.
+        let outline_rect = (self.config.outline_pinned || self.mode == Mode::Outline).then(|| {
+            let max = (area.width() * 0.7).max(OUTLINE_MIN_WIDTH);
+            let w = self.config.outline_width.clamp(OUTLINE_MIN_WIDTH, max);
+            let r = Rect::from_min_size(area.min, Vec2::new(w, area.height()));
+            if self.config.outline_pinned {
+                area.min.x += w;
+            }
+            r
+        });
+
         if self.viewport.is_none() {
             self.viewport = Some(self.new_viewport(area));
             self.restore_state();
@@ -1030,17 +1046,33 @@ impl eframe::App for VimpdfApp {
         {
             ui_commands.push(cmd);
         }
-        if self.mode == Mode::Outline {
-            let clicked = ui::outline::show(
+        if let Some(rect) = outline_rect {
+            let focused = self.mode == Mode::Outline;
+            if !focused {
+                // Pinned and idle: follow the page being read.
+                let current = self.outline_entry_for(vp.centre_page(&self.view.layout));
+                if current != self.outline.selected {
+                    self.outline.selected = current;
+                    self.outline.follow = true;
+                }
+            }
+            let out = ui::outline::show(
                 &ctx,
-                area,
-                &self.view.outline,
-                self.outline.selected,
-                self.outline.follow,
-                font_size,
+                ui::outline::Panel {
+                    rect,
+                    items: &self.view.outline,
+                    selected: self.outline.selected,
+                    follow: self.outline.follow,
+                    focused,
+                    pinned: self.config.outline_pinned,
+                    font_size,
+                },
             );
             self.outline.follow = false;
-            if let Some(i) = clicked {
+            if out.resized != 0.0 {
+                self.config.outline_width = (rect.width() + out.resized).max(OUTLINE_MIN_WIDTH);
+            }
+            if let Some(i) = out.clicked {
                 // Clicking jumps but keeps the panel open, to browse.
                 self.outline.selected = i;
                 if let Some(target) = self.view.outline[i].target.clone() {
@@ -1056,7 +1088,7 @@ impl eframe::App for VimpdfApp {
             }
             ctx.request_repaint();
         }
-        ctx.set_cursor_icon(cursor);
+        ctx.set_cursor_icon(self.hide_idle_pointer(&ctx, area, cursor));
     }
 
     fn on_exit(&mut self) {

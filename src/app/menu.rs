@@ -177,6 +177,11 @@ impl VimpdfApp {
                     self.mode == Mode::Outline,
                 ),
                 self.toggle_item(
+                    "&Keep outline open",
+                    Command::PinOutline,
+                    self.config.outline_pinned,
+                ),
+                self.toggle_item(
                     "Annotatio&ns panel",
                     Command::ToggleAnnotations,
                     self.mode == Mode::Annotations,

@@ -64,6 +64,14 @@ Colours are `"#rrggbb"` or `"#rrggbbaa"`.
 | `drag` | `"select"` | What dragging on a page does: `"select"` text or `"pan"` the view. |
 | `pan_modifier` | `"alt"` | Holding it swaps the drag behaviour (pans when `drag = "select"`, selects when `"pan"`). Middle-drag always pans. |
 | `copy_on_select` | `false` | Copy mouse selections to the clipboard as soon as the drag ends. |
+| `hide_after` | `2` | Hide the pointer over the pages after this many seconds without moving it; `0` never hides it. Moving the mouse shows it again. |
+
+### `[outline]`
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `pinned` | `false` | Keep the table of contents open beside the pages, which move right to make room. In the outline, `p` toggles it. |
+| `width` | `320` | Width of the outline, in points (at least 160). In the outline, `<` and `>` change it; so does dragging its right edge. |
 
 
 
@@ -161,6 +169,7 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `edit_config` | — (`:config`) |
 | `properties` | — (`:info`) |
 | `toggle_outline` | `<Tab>` |
+| `pin_outline` | `p` in the outline |
 | `reload` | `r` |
 | `source` | — |
 | `open <path>` | — |

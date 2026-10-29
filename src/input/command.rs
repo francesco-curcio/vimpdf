@@ -173,6 +173,8 @@ pub enum Command {
     ToggleRecolor,
     /// Table of contents panel.
     ToggleOutline,
+    /// Keep the outline open beside the pages, or stop.
+    PinOutline,
     /// Re-open the current file, keeping the position.
     Reload,
     Open(PathBuf),
@@ -248,6 +250,7 @@ const SIMPLE: &[(&str, Command)] = &[
     ("toggle_fullscreen", Command::ToggleFullscreen),
     ("toggle_recolor", Command::ToggleRecolor),
     ("toggle_outline", Command::ToggleOutline),
+    ("pin_outline", Command::PinOutline),
     ("reload", Command::Reload),
     ("source", Command::Source),
     ("cancel", Command::Cancel),

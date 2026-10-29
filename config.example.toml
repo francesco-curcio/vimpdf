@@ -34,6 +34,11 @@ zoom_modifier = "cmd"   # "cmd" | "ctrl" | "alt" | "shift"; pinch always zooms
 drag = "select"         # "select" | "pan"
 pan_modifier = "alt"
 copy_on_select = false
+hide_after = 2          # hide the pointer over the pages after 2 idle seconds; 0 = never
+
+[outline]
+pinned = false   # keep the outline open beside the pages (p in the outline toggles)
+width = 320      # points; < and > in the outline, or drag its edge
 
 [highlight]
 # Highlight colours by letter: in visual mode, a<letter> highlights the

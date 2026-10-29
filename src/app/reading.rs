@@ -18,6 +18,9 @@ const RELOAD_DELAY: Duration = Duration::from_millis(300);
 /// saved on quit and when opening another file).
 const SAVE_INTERVAL: Duration = Duration::from_secs(10);
 
+/// How much `<` and `>` change the outline's width.
+const OUTLINE_STEP: f32 = 40.0;
+
 /// State of the outline panel.
 #[derive(Default)]
 pub(super) struct OutlineState {
@@ -64,22 +67,35 @@ impl VimpdfApp {
             self.mode = Mode::Normal;
             return;
         }
-        // Select the last entry at or before the page being read.
         let current = self
             .viewport
             .as_ref()
             .map_or(0, |vp| vp.centre_page(&self.view.layout));
-        self.outline.selected = self
-            .view
-            .outline
-            .iter()
-            .rposition(|item| {
-                matches!(item.target, Some(LinkTarget::Internal { page, .. }) if page <= current)
-            })
-            .unwrap_or(0);
+        self.outline.selected = self.outline_entry_for(current);
         self.outline.follow = true;
         self.keys.reset();
         self.mode = Mode::Outline;
+    }
+
+    /// The last outline entry at or before `page`.
+    pub(super) fn outline_entry_for(&self, page: usize) -> usize {
+        self.view
+            .outline
+            .iter()
+            .rposition(|item| {
+                matches!(item.target, Some(LinkTarget::Internal { page: p, .. }) if p <= page)
+            })
+            .unwrap_or(0)
+    }
+
+    pub(super) fn pin_outline(&mut self) {
+        self.config.outline_pinned = !self.config.outline_pinned;
+        self.outline.follow = true;
+        self.info(if self.config.outline_pinned {
+            "Outline kept open (Tab focuses it)"
+        } else {
+            "Outline unpinned"
+        });
     }
 
     /// A key in the outline panel.
@@ -99,11 +115,54 @@ impl VimpdfApp {
                 let target = self.view.outline.get(*sel)?.target.clone();
                 return target.map(Command::FollowLink);
             }
+            "p" => return Some(Command::PinOutline),
+            "<" => {
+                self.config.outline_width =
+                    (self.config.outline_width - OUTLINE_STEP).max(OUTLINE_MIN_WIDTH);
+            }
+            ">" => self.config.outline_width += OUTLINE_STEP,
             "<Esc>" | "<Tab>" | "q" | "h" => self.mode = Mode::Normal,
             _ => {}
         }
         self.outline.follow = true;
         None
+    }
+
+    /// The cursor to show over the pages: none once the mouse has been
+    /// still for `mouse.hide_after` seconds, so it doesn't sit on the text.
+    pub(super) fn hide_idle_pointer(
+        &mut self,
+        ctx: &egui::Context,
+        area: Rect,
+        cursor: egui::CursorIcon,
+    ) -> egui::CursorIcon {
+        let (moved, pos) = ctx.input(|i| {
+            let moved = i.events.iter().any(|e| {
+                matches!(
+                    e,
+                    egui::Event::PointerMoved(_)
+                        | egui::Event::PointerButton { .. }
+                        | egui::Event::MouseWheel { .. }
+                )
+            });
+            (moved || i.pointer.any_down(), i.pointer.hover_pos())
+        });
+        if moved {
+            self.pointer_active = Instant::now();
+        }
+        let after = self.config.hide_pointer_after;
+        let over_pages = pos.is_some_and(|p| area.contains(p)) && !ctx.egui_wants_pointer_input();
+        if after <= 0.0 || !over_pages || cursor != egui::CursorIcon::Default {
+            return cursor;
+        }
+        let idle = self.pointer_active.elapsed();
+        let limit = Duration::from_secs_f32(after);
+        if idle >= limit {
+            egui::CursorIcon::None
+        } else {
+            ctx.request_repaint_after(limit - idle);
+            cursor
+        }
     }
 
     // --- Remembered positions -------------------------------------------

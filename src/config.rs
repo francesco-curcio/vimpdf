@@ -81,6 +81,13 @@ pub struct Config {
     pub pan_modifier: Modifier,
     pub zoom_modifier: Modifier,
     pub copy_on_select: bool,
+    /// Hide the mouse pointer over the pages after this many idle seconds;
+    /// 0 never hides it.
+    pub hide_pointer_after: f32,
+    /// Keep the outline open beside the pages.
+    pub outline_pinned: bool,
+    /// Width of the outline panel, in points.
+    pub outline_width: f32,
     /// Highlight colours by letter (`a<letter>` in visual mode), in order.
     pub highlight_colors: Vec<(char, Color)>,
     /// Letter of the colour used by `c` (comment) and the first `aa`.
@@ -124,6 +131,9 @@ impl Default for Config {
             pan_modifier: Modifier::Alt,
             zoom_modifier: Modifier::Cmd,
             copy_on_select: false,
+            hide_pointer_after: 2.0,
+            outline_pinned: false,
+            outline_width: 320.0,
             // Sorted by letter, like a palette read from the config file.
             highlight_colors: [
                 ('b', "#74c0fc"),
@@ -145,6 +155,9 @@ impl Default for Config {
         }
     }
 }
+
+/// Narrowest the outline panel gets.
+pub const OUTLINE_MIN_WIDTH: f32 = 160.0;
 
 /// Every option, as "section.name".
 pub const OPTIONS: &[&str] = &[
@@ -171,6 +184,9 @@ pub const OPTIONS: &[&str] = &[
     "mouse.pan_modifier",
     "mouse.zoom_modifier",
     "mouse.copy_on_select",
+    "mouse.hide_after",
+    "outline.pinned",
+    "outline.width",
     "highlight.colors",
     "highlight.default",
     "highlight.author",
@@ -361,6 +377,11 @@ impl Config {
             "mouse.pan_modifier" => self.pan_modifier = as_modifier(v)?,
             "mouse.zoom_modifier" => self.zoom_modifier = as_modifier(v)?,
             "mouse.copy_on_select" => self.copy_on_select = as_bool(v)?,
+            "mouse.hide_after" => self.hide_pointer_after = as_num(v, 0.0, 3600.0)?,
+            "outline.pinned" => self.outline_pinned = as_bool(v)?,
+            "outline.width" => {
+                self.outline_width = as_num(v, OUTLINE_MIN_WIDTH as f64, 2000.0)?;
+            }
             "highlight.colors" => {
                 let table = v.as_table().ok_or_else(|| {
                     format!("expected a table like {{ y = \"#ffe066\" }}, got {v}")
