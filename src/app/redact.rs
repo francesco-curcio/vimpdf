@@ -19,7 +19,33 @@ impl VimpdfApp {
         self.exit_visual();
     }
 
+    /// Redaction marks in the document, applied or not by `:redact`.
+    pub(super) fn redaction_marks(&self) -> usize {
+        self.annots
+            .list
+            .iter()
+            .filter(|a| a.kind == AnnotKind::Redact)
+            .count()
+    }
+
+    /// After a save: marks are only annotations, so the text under them is
+    /// still in the saved file. Say so, in red, until `:redact` is used.
+    pub(super) fn warn_unapplied_redactions(&mut self, what: &str) {
+        let marks = self.redaction_marks();
+        if marks > 0 {
+            self.error(format!(
+                "{what}, but {}: text still in the file. :redact removes it",
+                marks_not_applied(marks)
+            ));
+        }
+    }
+
+    /// Mark text or an area. The message says it's only a mark: `:redact`
+    /// is what removes the content.
     pub(super) fn request_marks(&mut self, parts: Vec<(usize, Vec<TextRect>)>) {
+        self.info(
+            "Marked for redaction — nothing is removed until :redact writes the redacted copy",
+        );
         self.view.editor.request(EditRequest::Create(NewAnnot {
             kind: AnnotKind::Redact,
             parts,
@@ -52,7 +78,7 @@ impl VimpdfApp {
         let q = search.query.clone();
         self.request_marks(parts);
         self.info(format!(
-            "Marked {n} matches of \"{q}\" for redaction (:redact applies)"
+            "Marked {n} matches of \"{q}\" for redaction: :redact removes them (into a new file)"
         ));
     }
 
@@ -144,6 +170,12 @@ pub(super) fn default_redacted_path(path: &std::path::Path) -> PathBuf {
         n += 1;
     }
     candidate
+}
+
+/// "1 redaction mark not applied", "3 redaction marks not applied".
+pub(super) fn marks_not_applied(n: usize) -> String {
+    let s = if n == 1 { "" } else { "s" };
+    format!("{n} redaction mark{s} not applied")
 }
 
 #[cfg(test)]

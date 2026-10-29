@@ -341,6 +341,14 @@ impl VimpdfApp {
     }
 
     pub(super) fn write_quit(&mut self, ctx: &egui::Context) {
+        // Quitting would hide the warning that the marks hide nothing.
+        let marks = self.redaction_marks();
+        if self.annots.unsaved && marks > 0 {
+            return self.error(format!(
+                "{}: text still in the file. :redact first, or :w then :q",
+                super::redact::marks_not_applied(marks)
+            ));
+        }
         if self.annots.unsaved {
             self.annots.quit_after_save = true;
             self.write(None);
@@ -433,6 +441,7 @@ impl VimpdfApp {
                         self.annots.unsaved_other = false;
                         self.remember_file_stamp();
                         self.info(format!("Saved annotations to {name}"));
+                        self.warn_unapplied_redactions("Saved");
                         if self.annots.quit_after_save {
                             ctx.send_viewport_cmd(ViewportCommand::Close);
                         }
@@ -445,8 +454,10 @@ impl VimpdfApp {
                         self.annots.unsaved = false;
                         self.annots.unsaved_other = false;
                         self.info(format!("Saved as {} — now editing it", path.display()));
+                        self.warn_unapplied_redactions("Saved");
                     } else {
                         self.info(format!("Saved a copy as {}", path.display()));
+                        self.warn_unapplied_redactions("Saved a copy");
                     }
                 }
                 EditEvent::Redacted {

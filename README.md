@@ -393,6 +393,9 @@ file: it always writes a new one.
    - an area (figure, image, signature): `X` puts a rectangle in the middle of
      the view; `h`/`j`/`k`/`l` move it, `H`/`J`/`K`/`L` resize it (counts work:
      `10L`), Enter marks it, Esc cancels — or drag a rectangle with the mouse.
+   Marks hide nothing by themselves: saved with `:w`, the text is still in
+   the file. vimpdf says so after marking and after every save while marks
+   are left, and `:wq` refuses to quit with unsaved marks.
 2. `:redact` applies every mark to a copy of the document and writes
    `<name>-redacted.pdf` next to it (`:redact <path>` chooses the name; an
    existing file is never overwritten, the original never). Under each mark,
