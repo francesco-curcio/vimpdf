@@ -24,18 +24,24 @@ const MOUSE: &[(&str, &str)] = &[
     ),
     ("drag a note or text box", "move it (<C-a> m)"),
     ("click page number in status bar", "go to page (:<n>)"),
+    (
+        "click a tab, × or middle click",
+        "switch to it (gt, {n}gt), close it (:q)",
+    ),
 ];
 
 const EX_COMMANDS: &[(&str, &str)] = &[
     (":<n>", "go to page n"),
-    (":open <path>", "open another file"),
+    (":open <path>", "open a file in a new tab (:tabe)"),
+    (":e <path>", "open a file in place of this one"),
+    (":tabnew", "new tab with the start page and recent files"),
+    (":q  :qa", "close this tab (the last one quits)  quit"),
     (
         ":set <option> <value>",
         "change an option (e.g. :set toolbar)",
     ),
     (":source", "reload the config file"),
     (":help", "this overlay"),
-    (":q", "quit"),
 ];
 
 /// Scroll position of the help overlay, driven by the keyboard.

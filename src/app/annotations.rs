@@ -290,7 +290,7 @@ impl VimpdfApp {
 
     // --- Saving and quitting ----------------------------------------------
 
-    fn resolve(&self, p: PathBuf) -> PathBuf {
+    pub(super) fn resolve(&self, p: PathBuf) -> PathBuf {
         if p.is_relative() {
             self.view.path.parent().map(|d| d.join(&p)).unwrap_or(p)
         } else {
@@ -353,7 +353,7 @@ impl VimpdfApp {
             self.annots.quit_after_save = true;
             self.write(None);
         } else {
-            ctx.send_viewport_cmd(ViewportCommand::Close);
+            self.close_tab(ctx);
         }
     }
 
@@ -366,17 +366,17 @@ impl VimpdfApp {
                 "Unsaved annotations: :w saves, :wq saves and quits, :q! discards"
             });
         }
-        ctx.send_viewport_cmd(ViewportCommand::Close);
+        self.close_tab(ctx);
     }
 
     pub(super) fn force_quit(&mut self, ctx: &egui::Context) {
         self.annots.unsaved = false;
-        ctx.send_viewport_cmd(ViewportCommand::Close);
+        self.close_tab(ctx);
     }
 
     /// The window's close button / ⌘Q: warn once about unsaved annotations.
     pub(super) fn guard_close(&mut self, ctx: &egui::Context) {
-        if !ctx.input(|i| i.viewport().close_requested()) || !self.annots.unsaved {
+        if !ctx.input(|i| i.viewport().close_requested()) || !self.show_unsaved_tab(ctx) {
             return;
         }
         let again = self
@@ -386,7 +386,9 @@ impl VimpdfApp {
         if !again {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.annots.close_attempt = Some(Instant::now());
-            self.error("Unsaved annotations: close again to discard them, or :w to save");
+            self.error(
+                "Unsaved annotations: close again to discard them (in every tab), or :w to save",
+            );
         }
     }
 
@@ -443,7 +445,8 @@ impl VimpdfApp {
                         self.info(format!("Saved annotations to {name}"));
                         self.warn_unapplied_redactions("Saved");
                         if self.annots.quit_after_save {
-                            ctx.send_viewport_cmd(ViewportCommand::Close);
+                            self.annots.quit_after_save = false;
+                            self.close_tab(ctx);
                         }
                     } else if self.annots.switch_after_save.as_ref() == Some(&path) {
                         // `:saveas`: the copy has everything; continue there.

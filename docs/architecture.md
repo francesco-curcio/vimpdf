@@ -21,6 +21,23 @@ produced it. Key bindings, `:` commands, mouse gestures and buttons all end
 in `VimpdfApp::execute`. That keeps bindings configurable and the logic
 testable without a window.
 
+## Tabs
+
+Each tab is one document. The active tab's state (`view`, `viewport`,
+`annots`, `selection`, `jumps`, …) lives directly in `VimpdfApp`'s fields, so
+all the per-document code works on "the document" without knowing about tabs.
+The other tabs are parked in `app/tabs.rs` as `Tab` structs holding the same
+fields; switching swaps them with `std::mem::swap`. Parked tabs keep their
+threads (render, search, annotation editor); their channels buffer whatever
+arrives until the tab is active again. Things that must cover every tab (quit
+with unsaved annotations, saving reading positions on exit) swap each parked
+tab in and out (`for_each_parked`).
+
+Only one vimpdf runs per user: `platform::instance` listens on a Unix socket
+in the private temp dir, and a later `vimpdf file.pdf` sends the path there
+and exits. Paths from the socket, from macOS's `application:openURLs:` and
+from drag and drop all go through the same queue and open as tabs.
+
 ## Threads
 
 - **UI thread** (eframe): input, layout arithmetic, texture upload, drawing.
@@ -232,14 +249,16 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `watch.rs` | File change notifications |
 | `app/reading.rs` | Recolor, outline keys, state save/restore, auto-reload |
 | `ui/outline.rs` | Outline panel |
-| `platform.rs` | Files opened from the system (macOS `application:openURLs:`), temporary-folder checks, the private temp dir |
+| `platform.rs` | Files opened from the system (macOS `application:openURLs:`), bringing the window to the front, the single-instance socket, temporary-folder checks, the private temp dir |
 | `present.rs` | Present mode: mailbox on Linux where the window's surface supports it (asked with a throwaway surface; the window starts on vsync and switches on its first frame), `VIMPDF_PRESENT_MODE` override |
 | `annotate.rs` | Annotation editor thread: highlights, comments, redaction marks, undo, saving |
 | `app/annotations.rs`, `ui/annotations.rs`, `ui/comment.rs` | Annotations UI |
 | `app/redact.rs` | Redaction marks, applying |
 | `app/place.rs` | Placement mode: redaction areas, notes, text boxes, moving |
 | `ui/menubar.rs`, `app/menu.rs` | Menu bar: widget + keyboard navigation, contents |
-| `welcome.rs` | The page shown when no document is open |
+| `welcome.rs` | The (blank) document behind the start page |
+| `app/tabs.rs`, `ui/tabbar.rs` | Tabs: parking and switching documents, the tab bar |
+| `app/start.rs` | Start page: recent files |
 | `scripts/` | App bundle and icon generation (macOS), install with desktop entry (Linux) |
 | `selection.rs` | Text positions, caret motions, selections, clean copying |
 | `app/hints.rs`, `app/searching.rs`, `app/visual.rs` | App-side hint mode, search, visual mode and mouse selection |

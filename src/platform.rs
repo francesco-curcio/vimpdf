@@ -55,11 +55,96 @@ pub fn set_waker(wake: impl Fn() + Send + 'static) {
     *WAKE.lock().expect("lock") = Some(Box::new(wake));
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn push_opened(paths: impl IntoIterator<Item = PathBuf>) {
+/// Queue paths to open (also used to put back the ones not opened at launch).
+pub fn push_opened(paths: impl IntoIterator<Item = PathBuf>) {
     OPENED.lock().expect("lock").extend(paths);
     if let Some(wake) = WAKE.lock().expect("lock").as_ref() {
         wake();
+    }
+}
+
+/// Bring the app to the front (after a file was opened from outside).
+#[cfg(target_os = "macos")]
+pub fn activate() {
+    macos::activate();
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn activate() {}
+
+/// One vimpdf per user: a later `vimpdf file.pdf` hands the file to the
+/// running one, which opens it in a tab. The running one listens on a Unix
+/// socket in the private temp dir; each line it reads is a path.
+#[cfg(unix)]
+pub mod instance {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// This process bound the socket (and removes it on quit).
+    static LISTENING: AtomicBool = AtomicBool::new(false);
+
+    fn socket_path() -> PathBuf {
+        let user = std::env::var("USER").unwrap_or_default();
+        super::private_temp_dir().join(format!("vimpdf-{user}.sock"))
+    }
+
+    /// Send `path` to a running vimpdf. False if none is running.
+    pub fn forward(path: &Path) -> bool {
+        let Ok(mut stream) = UnixStream::connect(socket_path()) else {
+            return false;
+        };
+        let mut line = path.as_os_str().as_encoded_bytes().to_vec();
+        line.push(b'\n');
+        stream.write_all(&line).is_ok()
+    }
+
+    /// Accept files from later launches, unless another vimpdf already does
+    /// (one started with `--new-window` while the first still runs).
+    pub fn listen() {
+        let path = socket_path();
+        if UnixStream::connect(&path).is_ok() {
+            return;
+        }
+        // Left over from a vimpdf that didn't quit cleanly.
+        let _ = std::fs::remove_file(&path);
+        let listener = match UnixListener::bind(&path) {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::warn!("cannot listen on {}: {e}", path.display());
+                return;
+            }
+        };
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+        LISTENING.store(true, Ordering::Relaxed);
+        let spawned = std::thread::Builder::new()
+            .name("vimpdf-instance".into())
+            .spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    let paths: Vec<PathBuf> = BufReader::new(stream)
+                        .split(b'\n')
+                        .map_while(Result::ok)
+                        .filter(|l| !l.is_empty())
+                        .map(|l| PathBuf::from(String::from_utf8_lossy(&l).into_owned()))
+                        .collect();
+                    tracing::debug!(?paths, "opened by another launch");
+                    super::push_opened(paths);
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::warn!("cannot start the instance listener: {e}");
+        }
+    }
+
+    /// Remove the socket on quit, if this process made it.
+    pub fn stop() {
+        if LISTENING.load(Ordering::Relaxed) {
+            let _ = std::fs::remove_file(socket_path());
+        }
     }
 }
 
@@ -96,6 +181,18 @@ mod macos {
             .collect();
         tracing::debug!(?paths, "opened from the system");
         super::push_opened(paths);
+        // While handling the system's open request, activating is allowed.
+        activate();
+    }
+
+    pub fn activate() {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        // `activate` needs macOS 14; this works everywhere (on 14+ it asks
+        // politely, which is granted for a file the user just opened).
+        #[allow(deprecated)]
+        NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
     }
 
     /// winit 0.30 installs its own application delegate (and aborts if it is

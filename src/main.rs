@@ -36,12 +36,17 @@ use crate::document::DocInfo;
 #[command(version, about)]
 struct Args {
     /// PDF file to open (without one, vimpdf waits for a file from the system,
-    /// e.g. Finder's Open With, or shows a welcome page).
+    /// e.g. Finder's Open With, or shows the start page with recent files).
+    /// If vimpdf is already running, the file opens there in a new tab.
     file: Option<PathBuf>,
 
     /// Config file to use instead of ~/.config/vimpdf/config.toml.
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
+
+    /// Open a separate window, instead of a tab in the running vimpdf.
+    #[arg(long)]
+    new_window: bool,
 }
 
 fn main() -> ExitCode {
@@ -80,6 +85,18 @@ fn run(args: Args) -> Result<()> {
         None => None,
     };
 
+    // Hand the file to a running vimpdf, which opens it in a tab.
+    #[cfg(unix)]
+    {
+        if let Some((path, _)) = &initial
+            && !args.new_window
+            && platform::instance::forward(path)
+        {
+            return Ok(());
+        }
+        platform::instance::listen();
+    }
+
     let config_path = args.config.or_else(Config::default_path);
     let (config, warnings) = match &config_path {
         Some(p) => Config::load(p),
@@ -114,10 +131,7 @@ fn run(args: Args) -> Result<()> {
             Some(doc) => doc,
             None => initial_document(&mut warnings)?,
         };
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let name = welcome::display_name(&path);
         cc.egui_ctx
             .send_viewport_cmd(eframe::egui::ViewportCommand::Title(name));
         let present = present::preferred(cc);
@@ -131,17 +145,23 @@ fn run(args: Args) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("failed to run the window: {e}"))
 }
 
-/// Without a command-line file: the last file the system asked us to open
-/// while launching, else the welcome page.
+/// Without a command-line file: the first file the system asked us to open
+/// while launching, else the start page.
 fn initial_document(
     warnings: &mut Vec<String>,
 ) -> Result<(PathBuf, DocInfo), Box<dyn std::error::Error + Send + Sync>> {
-    for path in platform::take_opened().into_iter().rev() {
+    // Several files: the first opens now, the others in tabs once the
+    // window is up.
+    let mut paths = platform::take_opened().into_iter();
+    for path in paths.by_ref() {
         match std::fs::canonicalize(&path)
             .map_err(anyhow::Error::from)
             .and_then(|p| DocInfo::load(&p).map(|info| (p, info)))
         {
-            Ok(doc) => return Ok(doc),
+            Ok(doc) => {
+                platform::push_opened(paths);
+                return Ok(doc);
+            }
             Err(e) => warnings.push(format!("cannot open {}: {e:#}", path.display())),
         }
     }

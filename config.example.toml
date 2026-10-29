@@ -7,6 +7,7 @@ font_family = "monospace"   # the system monospace font; or e.g. "Menlo", "JetBr
 font_size = 14
 statusbar = true
 menubar = true        # File / Edit / View menus; gm opens them even when hidden
+tabbar = true         # the tab bar (gt / gT switch tabs either way)
 toolbar = false
 start_maximised = true
 recolor = false       # start in recolor (dark) mode; <C-r> toggles

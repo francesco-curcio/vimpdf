@@ -104,10 +104,11 @@ it:
 - **Firefox**: Settings → General → Applications → "Portable Document Format
   (PDF)" → Use other… → choose `~/Applications/vimpdf.app`. Clicking a PDF
   link then downloads it and opens it in vimpdf.
-- Opening a PDF while vimpdf is running replaces the open document (one window,
-  one document). Dropping a PDF on the window does the same.
-- Launched without a file (e.g. from the Dock), vimpdf shows a short welcome
-  page; open a file with `:open <path>` or by dropping it on the window.
+- Opening a PDF while vimpdf is running opens it in a new tab of the running
+  window and brings it to the front (or switches to its tab if it's already
+  open). Dropping PDFs on the window does the same.
+- Launched without a file (e.g. from the Dock), vimpdf shows the start page
+  with your recently read files (see Tabs).
 
 The app is signed ad hoc (no Apple developer certificate), which is fine for
 a locally built app. `scripts/make-icon.sh` regenerates the icon.
@@ -117,8 +118,12 @@ a locally built app. `scripts/make-icon.sh` regenerates the icon.
 ```fish
 vimpdf paper.pdf
 vimpdf --config other.toml paper.pdf   # use a different config file
-vimpdf                                  # welcome page; :open a file from there
+vimpdf                                  # start page with recent files
+vimpdf --new-window paper.pdf           # a separate window, not a tab
 ```
+
+Only one vimpdf runs per user: `vimpdf paper.pdf` while it's running opens
+the file in a new tab there (on Linux and macOS alike) and exits.
 
 Key notation follows vim: `<C-d>` is Ctrl+d, `<C-F>` is Ctrl+Shift+f,
 `<S-Space>` is Shift+Space. Counts work as in vim: `5j`, `3J`, `12G`, `3+`.
@@ -163,7 +168,10 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `<C-F>` | Toggle fullscreen |
 | `r` | Reload the document, keeping the position |
 | `Esc` | Cancel a pending count/key sequence, clear the message and search highlights, close help |
-| `q` | Quit |
+| `q` | Close the tab (the last one quits); refused with unsaved annotations |
+| `gt` / `gT` | Next / previous tab; `3gt` goes to tab 3 |
+| `<C-PageDown>` / `<C-PageUp>`, `<C-Tab>` / `<C-S-Tab>` | Next / previous tab |
+| `Cmd+1`…`Cmd+9` (macOS), `Alt+1`…`Alt+9` (Linux) | Tab 1…9 |
 
 ### Mouse and trackpad
 
@@ -189,6 +197,19 @@ Internal links jump to the exact destination (a citation lands on the
 reference, with a little context above it). External links open in the
 default browser — only `http(s)` and `mailto` links, so a PDF can't use a link
 to launch local files or applications.
+
+### Tabs and the start page
+
+Each document opens in a tab; the tab bar at the top shows them numbered
+(`ui.tabbar = false` hides it). Switch with `gt` / `gT`, `{n}gt`, `Cmd+n`
+(`Alt+n` on Linux) or a click; close with `q` / `:q`, the `×`, or a middle
+click. Each tab keeps its own position, selection, search, jumps and
+annotations. Opening a file that is already open switches to its tab.
+
+Without a document (launched from the Dock, or `:tabnew`) the tab shows the
+start page: the recently read files, with the page you were on. `j`/`k` and
+Enter open one, or its number `1`-`9`, or a click; `:open <path>` and dropping
+a file work too. Opening a file from the start page replaces it.
 
 ### Jumps and marks
 
@@ -236,7 +257,10 @@ steps through them, `Shift+Tab` backwards.
 | Command | Action |
 | --- | --- |
 | `:<n>` | Go to page n |
-| `:open <path>`, `:o`, `:e` | Open another PDF (relative paths are relative to the current file; `~` works) |
+| `:open <path>`, `:o`, `:tabe` | Open a PDF in a new tab, or switch to its tab (relative paths are relative to the current file; `~` works) |
+| `:e <path>` | Open a PDF in place of the current one |
+| `:tabnew` | New tab with the start page |
+| `:tabn [n]`, `:tabp` | Next tab (or tab n), previous tab |
 | `:set <option> <value>` | Change an option for this session, e.g. `:set zoom.step 1.25`, `:set toolbar`, `:set notoolbar` |
 | `:source` | Reload the config file |
 | `:help` | Help overlay |
@@ -245,9 +269,11 @@ steps through them, `Shift+Tab` backwards.
 | `:saveas <path>` | Save a copy with the annotations and continue in it |
 | `:w!` | Save into a temporary copy anyway (see "PDFs from the browser") |
 | `:annotated` | Open the other copy of this paper that has your annotations |
-| `:wq`, `:x` | Save and quit |
-| `:q` | Quit (refused while there are unsaved annotations) |
-| `:q!` | Quit, discarding unsaved annotations |
+| `:wq`, `:x` | Save and close the tab |
+| `:q`, `:tabc` | Close the tab; the last one quits (refused while there are unsaved annotations) |
+| `:q!` | Close the tab, discarding unsaved annotations |
+| `:qa` | Quit, closing every tab (refused while a tab has unsaved annotations: it's shown) |
+| `:qa!` | Quit, discarding unsaved annotations in every tab |
 | `:e!` | Reload the file, discarding unsaved annotations |
 | `:annotations` | Annotations panel |
 | `:info` | Document properties |

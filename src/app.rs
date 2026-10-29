@@ -27,6 +27,8 @@ mod place;
 mod reading;
 mod redact;
 mod searching;
+mod start;
+mod tabs;
 mod visual;
 
 use annotations::Annotations;
@@ -95,6 +97,9 @@ pub struct VimpdfApp {
     pointer_active: Instant,
     /// The outline layout as last written to `ui.toml`.
     ui_saved: crate::state::UiState,
+    tabs: tabs::Tabs,
+    /// The start page's recent files, while it shows.
+    start: Option<start::StartScreen>,
 }
 
 impl VimpdfApp {
@@ -149,6 +154,8 @@ impl VimpdfApp {
             menu_state: Default::default(),
             menu_return: Mode::Normal,
             pointer_active: Instant::now(),
+            tabs: tabs::Tabs::default(),
+            start: None,
             ui_saved: crate::state::UiState {
                 outline_pinned: false,
                 outline_width: 0.0,
@@ -266,7 +273,9 @@ impl VimpdfApp {
             self.watch_file(ctx);
         }
         let name = self.view.file_name();
-        ctx.send_viewport_cmd(ViewportCommand::Title(name.clone()));
+        ctx.send_viewport_cmd(ViewportCommand::Title(crate::welcome::display_name(
+            &self.view.path,
+        )));
 
         match (keep_position, position, self.viewport.as_mut()) {
             (true, Some((page, offset)), Some(vp)) => {
@@ -495,11 +504,18 @@ impl VimpdfApp {
                 self.annots.unsaved = false;
                 self.open(ctx, self.view.path.clone(), true);
             }
-            Command::Open(path) => {
+            Command::Open(path) => self.open_tab(ctx, path),
+            Command::Edit(path) => {
                 if !self.has_unsaved() {
                     self.open(ctx, path, false);
                 }
             }
+            Command::NextTab => self.cycle_tab(ctx, 1),
+            Command::PrevTab(n) => self.cycle_tab(ctx, -i64::from(n)),
+            Command::GotoTab(n) => self.goto_tab(ctx, n),
+            Command::NewTab => self.new_start_tab(ctx),
+            Command::QuitAll => self.quit_all(ctx),
+            Command::ForceQuitAll => self.force_quit_all(ctx),
             Command::AwaitHighlight => {} // handled by the key state
             Command::Highlight(letter) => self.highlight(letter),
             Command::Comment => self.comment_on_selection(),
@@ -618,10 +634,14 @@ impl VimpdfApp {
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect::<Vec<_>>()
         }));
-        if let Some(path) = paths.pop() {
-            self.execute(Command::Open(path), ctx);
-            ctx.send_viewport_cmd(ViewportCommand::Focus);
+        if paths.is_empty() {
+            return;
         }
+        for path in paths {
+            self.execute(Command::Open(path), ctx);
+        }
+        ctx.send_viewport_cmd(ViewportCommand::Focus);
+        crate::platform::activate();
     }
 
     /// A command while the help overlay is open: scrolling commands scroll
@@ -722,6 +742,13 @@ impl VimpdfApp {
                 }
                 continue;
             }
+            if !visual
+                && self.keys.pending_display().is_empty()
+                && let Some(cmds) = self.start_key(&tok)
+            {
+                commands.extend(cmds);
+                continue;
+            }
             let keymap = if visual {
                 &self.visual_keymap
             } else {
@@ -810,6 +837,12 @@ impl eframe::App for VimpdfApp {
             area.min.y += h;
             r
         });
+        let tabbar_rect = self.config.tabbar.then(|| {
+            let h = ui::tabbar::height(font_size);
+            let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
+            area.min.y += h;
+            r
+        });
         let toolbar_rect = self.config.toolbar.then(|| {
             let h = toolbar::height(font_size);
             let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
@@ -824,15 +857,17 @@ impl eframe::App for VimpdfApp {
 
         // The outline: pinned, it takes a strip on the left and the pages
         // move right; opened with <Tab> only, it covers the pages.
-        let outline_rect = (self.config.outline_pinned || self.mode == Mode::Outline).then(|| {
-            let max = (area.width() * 0.7).max(OUTLINE_MIN_WIDTH);
-            let w = self.config.outline_width.clamp(OUTLINE_MIN_WIDTH, max);
-            let r = Rect::from_min_size(area.min, Vec2::new(w, area.height()));
-            if self.config.outline_pinned {
-                area.min.x += w;
-            }
-            r
-        });
+        let on_start = self.on_start_page();
+        let outline_rect =
+            ((self.config.outline_pinned && !on_start) || self.mode == Mode::Outline).then(|| {
+                let max = (area.width() * 0.7).max(OUTLINE_MIN_WIDTH);
+                let w = self.config.outline_width.clamp(OUTLINE_MIN_WIDTH, max);
+                let r = Rect::from_min_size(area.min, Vec2::new(w, area.height()));
+                if self.config.outline_pinned {
+                    area.min.x += w;
+                }
+                r
+            });
 
         if self.viewport.is_none() {
             self.viewport = Some(self.new_viewport(area));
@@ -850,6 +885,7 @@ impl eframe::App for VimpdfApp {
         }
 
         // Input → commands.
+        self.update_start_screen();
         let mut commands = self.keyboard_commands(&ctx);
         let mut cursor = egui::CursorIcon::Default;
         if self.mode == Mode::Place && !ctx.egui_wants_pointer_input() {
@@ -860,7 +896,7 @@ impl eframe::App for VimpdfApp {
             if let Some(c) = self.place_hover_cursor(hover) {
                 cursor = c;
             }
-        } else if !ctx.egui_wants_pointer_input() && self.menu.is_none() {
+        } else if !ctx.egui_wants_pointer_input() && self.menu.is_none() && self.start.is_none() {
             let (cmds, text_cursor) = self.mouse_selection(&ctx, area);
             commands.extend(cmds);
             if let Some(c) = text_cursor {
@@ -869,6 +905,7 @@ impl eframe::App for VimpdfApp {
         }
         if !ctx.egui_wants_pointer_input()
             && self.menu.is_none()
+            && self.start.is_none()
             && let Some(vp) = &self.viewport
         {
             let m = mouse::handle(
@@ -937,6 +974,10 @@ impl eframe::App for VimpdfApp {
         self.draw_placing(&painter, area, &vp);
         self.draw_selection(&painter, area, &vp);
         self.draw_hints(&painter, area, &vp);
+        let mut start_command = None;
+        if self.start.is_some() {
+            start_command = self.show_start_screen(ui, area);
+        }
 
         // Bars and overlays.
         if self
@@ -953,6 +994,17 @@ impl eframe::App for VimpdfApp {
         let page = vp.centre_page(&self.view.layout) + 1;
         let pages = self.view.page_count();
         let mut ui_commands = Vec::new();
+        ui_commands.extend(start_command);
+        if let Some(rect) = tabbar_rect {
+            match ui::tabbar::show(ui, rect, &self.tab_labels(), font_size) {
+                Some(ui::tabbar::TabAction::Switch(i)) => ui_commands.push(Command::GotoTab(i + 1)),
+                Some(ui::tabbar::TabAction::Close(i)) => {
+                    ui_commands.push(Command::GotoTab(i + 1));
+                    ui_commands.push(Command::Quit);
+                }
+                None => {}
+            }
+        }
         if let Some(rect) = toolbar_rect {
             ui_commands.extend(self.toolbar.show(ui, rect, page, pages, font_size));
         }
@@ -986,7 +1038,7 @@ impl eframe::App for VimpdfApp {
                 }
             },
             (Some(rect), _) => {
-                let mut file = self.view.file_name();
+                let mut file = crate::welcome::display_name(&self.view.path);
                 if self.annots.unsaved {
                     file.push_str(" [+]");
                 }
@@ -1101,7 +1153,9 @@ impl eframe::App for VimpdfApp {
     }
 
     fn on_exit(&mut self) {
-        self.save_state();
+        self.save_all_states();
         crate::annotate::remove_own_work_dirs();
+        #[cfg(unix)]
+        crate::platform::instance::stop();
     }
 }

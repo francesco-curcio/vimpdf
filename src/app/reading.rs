@@ -185,7 +185,7 @@ impl VimpdfApp {
         }
         let after = self.config.hide_pointer_after;
         let over_pages = pos.is_some_and(|p| area.contains(p)) && !ctx.egui_wants_pointer_input();
-        if after <= 0.0 || !over_pages {
+        if after <= 0.0 || !over_pages || self.start.is_some() {
             return cursor;
         }
         let idle = self.pointer_active.elapsed();
@@ -256,6 +256,9 @@ impl VimpdfApp {
     /// Restore the saved zoom, fit, position and marks of the open file.
     pub(super) fn restore_state(&mut self) {
         self.persist.annotated_copy = None;
+        if crate::welcome::is_welcome(&self.view.path) {
+            return;
+        }
         let Some(dir) = state::state_dir() else {
             return;
         };

@@ -72,17 +72,31 @@ fn path() -> PathBuf {
     crate::platform::private_temp_dir().join("vimpdf-welcome.pdf")
 }
 
-/// Whether `path` (canonical) is the welcome page.
+/// Whether `path` is the welcome page. Both sides are canonicalized: older
+/// versions recorded it under a non-canonical temp path.
 pub fn is_welcome(path: &std::path::Path) -> bool {
-    std::fs::canonicalize(self::path()).is_ok_and(|p| p == path)
+    path.file_name() == self::path().file_name()
+        && std::fs::canonicalize(self::path())
+            .is_ok_and(|p| p == path || std::fs::canonicalize(path).is_ok_and(|q| q == p))
 }
 
-/// Write the welcome page to a temporary file and return its path.
+/// The name shown for a document: "vimpdf" for the welcome page.
+pub fn display_name(path: &std::path::Path) -> String {
+    if is_welcome(path) {
+        return "vimpdf".into();
+    }
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Write the welcome page to a temporary file and return its canonical
+/// path (documents are known by their canonical paths).
 pub fn write() -> Result<PathBuf> {
     let path = path();
     std::fs::write(&path, pdf_bytes())
         .with_context(|| format!("cannot write {}", path.display()))?;
-    Ok(path)
+    Ok(std::fs::canonicalize(&path).unwrap_or(path))
 }
 
 #[cfg(test)]

@@ -177,7 +177,22 @@ pub enum Command {
     PinOutline,
     /// Re-open the current file, keeping the position.
     Reload,
+    /// Open a file in a new tab (or switch to its tab).
     Open(PathBuf),
+    /// Open a file in place of the current one (`:e`).
+    Edit(PathBuf),
+    /// `gt`: the next tab; with a count, that tab.
+    NextTab,
+    /// `gT`: back `n` tabs.
+    PrevTab(u32),
+    /// Tab `n`, counted from 1.
+    GotoTab(usize),
+    /// A new tab with the start page.
+    NewTab,
+    /// `:qa`: close every tab and quit.
+    QuitAll,
+    /// `:qa!`: the same, discarding unsaved annotations.
+    ForceQuitAll,
     /// Set a config option (`:set zoom.step 1.2`).
     Set {
         option: String,
@@ -209,6 +224,7 @@ const COUNTED: &[(&str, MakeCounted)] = &[
     ("jump_forward", Command::JumpForward),
     ("search_next", Command::SearchNext),
     ("search_prev", Command::SearchPrev),
+    ("prev_tab", Command::PrevTab),
 ];
 
 /// Commands without arguments, by config name.
@@ -255,6 +271,9 @@ const SIMPLE: &[(&str, Command)] = &[
     ("source", Command::Source),
     ("cancel", Command::Cancel),
     ("quit", Command::Quit),
+    ("next_tab", Command::NextTab),
+    ("new_tab", Command::NewTab),
+    ("quit_all", Command::QuitAll),
 ];
 
 impl Command {
@@ -279,6 +298,8 @@ impl Command {
             JumpForward(k) => JumpForward(k * n),
             Move(m, k) => Move(m, k * n),
             SearchPrev(k) => SearchPrev(k * n),
+            PrevTab(k) => PrevTab(k * n),
+            NextTab | GotoTab(_) => GotoTab(n as usize),
             GotoFirst | GotoLast | GotoPage(_) => GotoPage(n as usize),
             other => other,
         }
@@ -346,7 +367,12 @@ impl Command {
             ("command_line", a) => Ok(Command::EnterCommandLine(a.unwrap_or("").to_owned())),
             ("search_prompt", a) => Ok(Command::EnterSearch(a.unwrap_or("").to_owned())),
             ("search", a) => Ok(Command::Search(a.unwrap_or("").to_owned())),
+            ("goto_tab", Some(a)) => a
+                .parse::<usize>()
+                .map(Command::GotoTab)
+                .map_err(|_| format!("'goto_tab' takes a tab number, got '{a}'")),
             ("open", Some(a)) => Ok(Command::Open(expand_tilde(a))),
+            ("edit", Some(a)) => Ok(Command::Edit(expand_tilde(a))),
             ("", _) => Err("empty command".into()),
             _ => Err(format!("unknown command '{s}'")),
         }
@@ -370,6 +396,8 @@ impl Command {
         }
         match self {
             Command::GotoPage(n) => format!("goto_page {n}"),
+            Command::GotoTab(n) => format!("goto_tab {n}"),
+            Command::Edit(p) => format!("edit {}", p.display()),
             Command::EnterCommandLine(s) if s.is_empty() => "command_line".into(),
             Command::EnterCommandLine(s) => format!("command_line {s}"),
             Command::EnterSearch(s) if s.is_empty() => "search_prompt".into(),
@@ -392,7 +420,7 @@ impl Command {
             ScrollDown(n) | ScrollUp(n) | ScrollLeft(n) | ScrollRight(n) | HalfPageDown(n)
             | HalfPageUp(n) | ScreenDown(n) | ScreenUp(n) | NextPage(n) | PrevPage(n)
             | ZoomIn(n) | ZoomOut(n) | SearchNext(n) | SearchPrev(n) | JumpBack(n)
-            | JumpForward(n) => Some(*n),
+            | JumpForward(n) | PrevTab(n) => Some(*n),
             _ => None,
         }
     }
@@ -409,6 +437,8 @@ pub const EX_COMMANDS: &[&str] = &[
     "info",
     "open",
     "properties",
+    "qall",
+    "qall!",
     "quit",
     "quit!",
     "redact",
@@ -416,6 +446,11 @@ pub const EX_COMMANDS: &[&str] = &[
     "saveas",
     "set",
     "source",
+    "tabclose",
+    "tabedit",
+    "tabnew",
+    "tabnext",
+    "tabprevious",
     "wq",
     "write",
     "write!",
@@ -423,7 +458,8 @@ pub const EX_COMMANDS: &[&str] = &[
 
 /// `:` commands whose argument is a file path.
 pub const PATH_COMMANDS: &[&str] = &[
-    "o", "open", "e", "edit", "w", "write", "w!", "write!", "sav", "saveas", "redact",
+    "o", "open", "e", "edit", "tabe", "tabedit", "tabnew", "w", "write", "w!", "write!", "sav",
+    "saveas", "redact",
 ];
 
 /// Every command name usable on the `:` line and in key bindings.
@@ -436,6 +472,7 @@ pub fn command_names() -> Vec<&'static str> {
         "search_prompt",
         "search",
         "open",
+        "goto_tab",
     ]);
     names
 }
@@ -454,8 +491,18 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
         None => (line, ""),
     };
     let cmd = match word {
-        "q" | "quit" | "qa" => Command::Quit,
-        "q!" | "quit!" | "qa!" => Command::ForceQuit,
+        "q" | "quit" | "clo" | "close" | "tabc" | "tabclose" => Command::Quit,
+        "q!" | "quit!" | "tabc!" | "tabclose!" => Command::ForceQuit,
+        "qa" | "qall" | "quitall" => Command::QuitAll,
+        "qa!" | "qall!" | "quitall!" => Command::ForceQuitAll,
+        "tabn" | "tabnext" if rest.is_empty() => Command::NextTab,
+        "tabn" | "tabnext" => match rest.parse::<usize>() {
+            Ok(n) => Command::GotoTab(n),
+            Err(_) => return Err(format!(":{word} takes a tab number")),
+        },
+        "tabp" | "tabprevious" | "tabN" | "tabNext" => Command::PrevTab(1),
+        "tabe" | "tabedit" | "tabnew" | "tabopen" if rest.is_empty() => Command::NewTab,
+        "tabe" | "tabedit" | "tabnew" | "tabopen" => Command::Open(expand_tilde(rest)),
         "w!" | "write!" => Command::WriteForce,
         "sav" | "saveas" if rest.is_empty() => return Err(":saveas needs a file path".into()),
         "sav" | "saveas" => Command::SaveAs(expand_tilde(rest)),
@@ -473,7 +520,8 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
         "o" | "open" | "e" | "edit" if rest.is_empty() => {
             return Err(format!(":{word} needs a file path"));
         }
-        "o" | "open" | "e" | "edit" => Command::Open(expand_tilde(rest)),
+        "o" | "open" => Command::Open(expand_tilde(rest)),
+        "e" | "edit" => Command::Edit(expand_tilde(rest)),
         "so" | "source" => Command::Source,
         "h" | "help" => Command::ToggleHelp,
         "set" | "se" => return parse_set(rest).map(Some),
@@ -535,6 +583,23 @@ mod tests {
         assert_eq!(Command::GotoLast.with_count(12), Command::GotoPage(12));
         assert_eq!(Command::GotoFirst.with_count(3), Command::GotoPage(3));
         assert_eq!(Command::Quit.with_count(3), Command::Quit);
+    }
+
+    #[test]
+    fn tab_commands() {
+        let ex = |l: &str| parse_ex(l).unwrap().unwrap();
+        assert_eq!(ex("open a.pdf"), Command::Open("a.pdf".into()));
+        assert_eq!(ex("tabe a.pdf"), Command::Open("a.pdf".into()));
+        assert_eq!(ex("e a.pdf"), Command::Edit("a.pdf".into()));
+        assert_eq!(ex("tabnew"), Command::NewTab);
+        assert_eq!(ex("tabn"), Command::NextTab);
+        assert_eq!(ex("tabn 4"), Command::GotoTab(4));
+        assert_eq!(ex("tabp"), Command::PrevTab(1));
+        assert_eq!(ex("q"), Command::Quit);
+        assert_eq!(ex("tabc"), Command::Quit);
+        assert_eq!(ex("qa"), Command::QuitAll);
+        assert_eq!(ex("qa!"), Command::ForceQuitAll);
+        assert_eq!(Command::parse("goto_tab 2"), Ok(Command::GotoTab(2)));
     }
 
     #[test]

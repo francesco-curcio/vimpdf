@@ -40,7 +40,7 @@ impl VimpdfApp {
             .map(|d| crate::state::recent(&d, RECENT_FILES + 1))
             .unwrap_or_default()
             .into_iter()
-            .filter(|p| *p != self.view.path)
+            .filter(|p| *p != self.view.path && !crate::welcome::is_welcome(p))
             .take(RECENT_FILES)
             .enumerate()
             .map(|(i, p)| {
@@ -77,6 +77,7 @@ impl VimpdfApp {
             label: "&File".into(),
             items: vec![
                 self.item("&Open…", Command::EnterCommandLine("open ".into()), ":open"),
+                self.item("New &tab", Command::NewTab, ":tabnew"),
                 Item::Submenu {
                     label: "Open &recent".into(),
                     items: recent,
@@ -110,7 +111,12 @@ impl VimpdfApp {
                 Item::Separator,
                 self.item("Document &info…", Command::ToggleProperties, ":info"),
                 Item::Separator,
-                self.item("&Quit", Command::Quit, ":q"),
+                self.item("Next ta&b", Command::NextTab, "gt")
+                    .enabled(self.tab_count() > 1),
+                self.item("Previous tab", Command::PrevTab(1), "gT")
+                    .enabled(self.tab_count() > 1),
+                self.item("&Close tab", Command::Quit, ":q"),
+                self.item("&Quit", Command::QuitAll, ":qa"),
             ],
         };
         let edit = Menu {

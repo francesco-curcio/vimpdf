@@ -9,6 +9,7 @@ pub mod help;
 pub mod menubar;
 pub mod outline;
 pub mod statusbar;
+pub mod tabbar;
 pub mod toolbar;
 
 use eframe::egui::Color32;

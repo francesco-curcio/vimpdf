@@ -24,6 +24,7 @@ unambiguous (`toolbar`). Booleans also accept `:set toolbar` / `:set notoolbar`.
 | `statusbar` | `true` | Show the status bar. |
 | `toolbar` | `false` | Show the toolbar (`<C-t>` toggles it). |
 | `menubar` | `true` | Show the File / Edit / View menu bar (`gm` opens it even when hidden). |
+| `tabbar` | `true` | Show the tab bar. Tabs work the same without it (`gt`, `gT`, `{n}gt`). |
 | `start_maximised` | `true` | Open the window filling the screen's usable area. |
 | `recolor` | `false` | Start in recolor (dark) mode; `<C-r>` toggles. |
 | `auto_reload` | `true` | Reload the document when the file changes on disk. |
@@ -173,13 +174,18 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `toggle_menubar` | — (`:set menubar`) |
 | `edit_config` | — (`:config`) |
 | `properties` | — (`:info`) |
+| `next_tab` | `gt`, `<C-PageDown>`, `<C-Tab>` (with a count: that tab) |
+| `prev_tab` | `gT`, `<C-PageUp>`, `<C-S-Tab>` |
+| `goto_tab <n>` | `<D-1>`…`<D-9>` on macOS, `<A-1>`…`<A-9>` elsewhere |
+| `new_tab` | — (`:tabnew`) |
+| `quit_all` | — (`:qa`) |
 | `toggle_outline` | `<Tab>` |
 | `pin_outline` | `p` in the outline |
 | `reload` | `r` |
 | `source` | — |
 | `open <path>` | — |
 | `cancel` | `<Esc>` |
-| `quit` | `q` |
+| `quit` | `q` (closes the tab; the last one quits) |
 
 Visual mode only:
 

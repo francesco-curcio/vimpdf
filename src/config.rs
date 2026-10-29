@@ -72,6 +72,8 @@ pub struct Config {
     pub auto_reload: bool,
     /// Show the File / Edit / View menu bar.
     pub menubar: bool,
+    /// Show the tab bar.
+    pub tabbar: bool,
     pub colors: Colors,
     pub scroll_step: f32,
     pub smooth_scroll: bool,
@@ -114,6 +116,7 @@ impl Default for Config {
             recolor: false,
             auto_reload: true,
             menubar: true,
+            tabbar: true,
             colors: Colors {
                 page_background: c("#ffffff"),
                 recolor_dark: c("#1e1e1e"),
@@ -169,6 +172,7 @@ pub const OPTIONS: &[&str] = &[
     "ui.recolor",
     "ui.auto_reload",
     "ui.menubar",
+    "ui.tabbar",
     "colors.page_background",
     "colors.recolor_dark",
     "colors.recolor_light",
@@ -343,6 +347,7 @@ impl Config {
             "ui.recolor" => self.recolor = as_bool(v)?,
             "ui.auto_reload" => self.auto_reload = as_bool(v)?,
             "ui.menubar" => self.menubar = as_bool(v)?,
+            "ui.tabbar" => self.tabbar = as_bool(v)?,
             "colors.page_background" => self.colors.page_background = as_color(v)?,
             "colors.recolor_dark" => self.colors.recolor_dark = as_color(v)?,
             "colors.recolor_light" => self.colors.recolor_light = as_color(v)?,

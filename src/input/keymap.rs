@@ -244,8 +244,19 @@ impl Keymap {
             ("D", DeleteHints),
             ("gm", OpenMenu),
             ("<F10>", OpenMenu),
+            ("gt", NextTab),
+            ("gT", PrevTab(1)),
+            ("<C-PageDown>", NextTab),
+            ("<C-PageUp>", PrevTab(1)),
+            ("<C-Tab>", NextTab),
+            ("<C-S-Tab>", PrevTab(1)),
         ] {
             k.bind(seq, cmd);
+        }
+        // Tab n: Cmd+n on macOS, Alt+n elsewhere (like browsers).
+        let modifier = if cfg!(target_os = "macos") { "D" } else { "A" };
+        for n in 1..=9 {
+            k.bind(&format!("<{modifier}-{n}>"), GotoTab(n));
         }
         k
     }
@@ -500,8 +511,25 @@ mod tests {
         );
         km.unbind(&parse_sequence("gv").unwrap());
         km.unbind(&parse_sequence("gm").unwrap());
+        km.unbind(&parse_sequence("gt").unwrap());
+        km.unbind(&parse_sequence("gT").unwrap());
         let mut st = KeyState::default();
         assert_eq!(feed_all(&mut st, &km, &["g"]), vec![Command::GotoLast]);
+    }
+
+    #[test]
+    fn tab_keys_take_counts() {
+        let km = Keymap::default_normal();
+        let mut st = KeyState::default();
+        assert_eq!(feed_all(&mut st, &km, &["g", "t"]), vec![Command::NextTab]);
+        assert_eq!(
+            feed_all(&mut st, &km, &["3", "g", "t"]),
+            vec![Command::GotoTab(3)]
+        );
+        assert_eq!(
+            feed_all(&mut st, &km, &["2", "g", "T"]),
+            vec![Command::PrevTab(2)]
+        );
     }
 
     #[test]
