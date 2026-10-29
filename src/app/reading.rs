@@ -98,6 +98,37 @@ impl VimpdfApp {
         });
     }
 
+    fn ui_state(&self) -> state::UiState {
+        state::UiState {
+            outline_pinned: self.config.outline_pinned,
+            outline_width: self.config.outline_width,
+        }
+    }
+
+    /// Apply the outline layout chosen in an earlier session over the
+    /// config file's.
+    pub(super) fn restore_ui_state(&mut self) {
+        if let Some(ui) = state::state_dir().and_then(|d| state::load_ui(&d)) {
+            self.config.outline_pinned = ui.outline_pinned;
+            self.config.outline_width = ui.outline_width.max(OUTLINE_MIN_WIDTH);
+        }
+        self.ui_saved = self.ui_state();
+    }
+
+    /// Write the outline layout when it changes (once a resize drag ends).
+    pub(super) fn remember_ui_state(&mut self, ctx: &egui::Context) {
+        let ui = self.ui_state();
+        if ui == self.ui_saved || ctx.input(|i| i.pointer.any_down()) {
+            return;
+        }
+        self.ui_saved = ui;
+        if let Some(dir) = state::state_dir()
+            && let Err(e) = state::save_ui(&dir, ui)
+        {
+            tracing::warn!("cannot save the outline layout: {e:#}");
+        }
+    }
+
     /// A key in the outline panel.
     pub(super) fn outline_key(&mut self, tok: &str) -> Option<Command> {
         let len = self.view.outline.len();

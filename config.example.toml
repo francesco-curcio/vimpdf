@@ -37,6 +37,7 @@ copy_on_select = false
 hide_after = 2          # hide the pointer over the pages after 2 idle seconds; 0 = never
 
 [outline]
+# Changes made in the app are remembered and override these (see docs).
 pinned = false   # keep the outline open beside the pages (p in the outline toggles)
 width = 320      # points; < and > in the outline, or drag its edge
 

@@ -1,6 +1,7 @@
 //! Per-file state remembered between sessions: position, zoom, fit mode and
 //! marks. Stored in `$XDG_STATE_HOME/vimpdf/` (default `~/.local/state/vimpdf/`),
-//! one small TOML file per document, named after a hash of its path.
+//! one small TOML file per document, named after a hash of its path, plus
+//! `ui.toml` for the layout chosen in the app (the outline's pin and width).
 
 use std::path::{Path, PathBuf};
 
@@ -200,6 +201,56 @@ pub fn save(dir: &Path, doc: &Path, state: &FileState) -> Result<()> {
     Ok(())
 }
 
+/// Layout chosen in the app, for every document. It overrides the config
+/// file's `outline.pinned` and `outline.width`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UiState {
+    pub outline_pinned: bool,
+    pub outline_width: f32,
+}
+
+impl UiState {
+    fn to_toml(self) -> String {
+        format!(
+            "[outline]\npinned = {}\nwidth = {}\n",
+            self.outline_pinned,
+            self.outline_width.round()
+        )
+    }
+
+    fn from_toml(text: &str) -> Option<Self> {
+        let table: Table = text.parse().ok()?;
+        let outline = table.get("outline")?.as_table()?;
+        let width = outline.get("width")?;
+        Some(Self {
+            outline_pinned: outline.get("pinned")?.as_bool()?,
+            outline_width: width
+                .as_float()
+                .or_else(|| width.as_integer().map(|i| i as f64))?
+                as f32,
+        })
+    }
+}
+
+/// `ui.toml` has no `path`, so `recent` and `find_copies` skip it.
+fn ui_file(dir: &Path) -> PathBuf {
+    dir.join("ui.toml")
+}
+
+pub fn load_ui(dir: &Path) -> Option<UiState> {
+    UiState::from_toml(&std::fs::read_to_string(ui_file(dir)).ok()?)
+}
+
+pub fn save_ui(dir: &Path, ui: UiState) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    let file = ui_file(dir);
+    let tmp = file.with_extension("toml.tmp");
+    std::fs::write(&tmp, ui.to_toml())
+        .with_context(|| format!("cannot write {}", tmp.display()))?;
+    std::fs::rename(&tmp, &file).with_context(|| format!("cannot write {}", file.display()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +298,19 @@ mod tests {
     fn hash_is_stable() {
         // Changing this would orphan everyone's saved positions.
         assert_eq!(fnv1a(b"/papers/attention.pdf"), 0xb009_4b99_6415_cf58);
+    }
+
+    #[test]
+    fn ui_state_round_trips_and_is_not_a_document() {
+        let dir = std::env::temp_dir().join(format!("vimpdf-ui-state-{}", std::process::id()));
+        let ui = UiState {
+            outline_pinned: true,
+            outline_width: 412.0,
+        };
+        save_ui(&dir, ui).unwrap();
+        assert_eq!(load_ui(&dir), Some(ui));
+        assert!(recent(&dir, 10).is_empty());
+        assert!(find_copies(&dir, "x", Path::new("/nowhere")).is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

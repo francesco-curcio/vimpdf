@@ -93,6 +93,8 @@ pub struct VimpdfApp {
     show_props: bool,
     /// When the mouse last moved, to hide an idle pointer.
     pointer_active: Instant,
+    /// The outline layout as last written to `ui.toml`.
+    ui_saved: crate::state::UiState,
 }
 
 impl VimpdfApp {
@@ -147,9 +149,14 @@ impl VimpdfApp {
             menu_state: Default::default(),
             menu_return: Mode::Normal,
             pointer_active: Instant::now(),
+            ui_saved: crate::state::UiState {
+                outline_pinned: false,
+                outline_width: 0.0,
+            },
             show_props: false,
         };
         app.install_font(ctx, &mut warnings);
+        app.restore_ui_state();
         app.watch_file(ctx);
         app.report_warnings(warnings);
         app
@@ -289,6 +296,7 @@ impl VimpdfApp {
         let (visual_keymap, key_warnings) = config.visual_keymap();
         warnings.extend(key_warnings);
         self.config = config;
+        self.restore_ui_state();
         self.keymap = keymap;
         self.visual_keymap = visual_keymap;
         self.keys.reset();
@@ -1081,6 +1089,7 @@ impl eframe::App for VimpdfApp {
             }
         }
         self.save_state_periodically();
+        self.remember_ui_state(&ctx);
 
         if !ui_commands.is_empty() {
             for cmd in ui_commands {

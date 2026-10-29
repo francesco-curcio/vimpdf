@@ -157,7 +157,7 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `:` | Command line |
 | `gm` | Open the menu bar (File / Edit / View) — see Menus |
 | `?` | Help overlay: active keys, mouse actions, commands. Your scroll keys (`j`/`k`, `<C-d>`/`<C-u>`, `gg`/`G`, counts…) scroll it; `?`, `Esc` or `q` close it |
-| `<Tab>` | Outline (table of contents) panel. Inside it: `j`/`k`, Enter to jump, `p` to keep it open beside the pages (`<Tab>` then moves the keys between it and the pages), `<`/`>` to make it narrower or wider, `Esc` to leave it. Long titles wrap |
+| `<Tab>` | Outline (table of contents) panel. Inside it: `j`/`k`, Enter to jump, `p` to keep it open beside the pages (`<Tab>` then moves the keys between it and the pages), `<`/`>` to make it narrower or wider (pin and width are remembered), `Esc` to leave it. Long titles wrap |
 | `<C-r>` | Toggle recolor (dark mode) |
 | `<C-t>` | Toggle the toolbar |
 | `<C-F>` | Toggle fullscreen |

@@ -73,6 +73,11 @@ Colours are `"#rrggbb"` or `"#rrggbbaa"`.
 | `pinned` | `false` | Keep the table of contents open beside the pages, which move right to make room. In the outline, `p` toggles it. |
 | `width` | `320` | Width of the outline, in points (at least 160). In the outline, `<` and `>` change it; so does dragging its right edge. |
 
+Changing either in the app (`p`, `<`/`>`, dragging, the View menu or `:set`)
+is remembered for every document in `~/.local/state/vimpdf/ui.toml`, which
+then takes precedence over these values. Delete that file to go back to the
+config file's.
+
 
 
 ### `[highlight]`
