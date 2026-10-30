@@ -74,6 +74,8 @@ pub struct Config {
     pub menubar: bool,
     /// Show the tab bar.
     pub tabbar: bool,
+    /// Files opened while vimpdf runs become tabs of the running window.
+    pub single_instance: bool,
     pub colors: Colors,
     pub scroll_step: f32,
     pub smooth_scroll: bool,
@@ -117,6 +119,7 @@ impl Default for Config {
             auto_reload: true,
             menubar: true,
             tabbar: true,
+            single_instance: true,
             colors: Colors {
                 page_background: c("#ffffff"),
                 recolor_dark: c("#1e1e1e"),
@@ -173,6 +176,7 @@ pub const OPTIONS: &[&str] = &[
     "ui.auto_reload",
     "ui.menubar",
     "ui.tabbar",
+    "ui.single_instance",
     "colors.page_background",
     "colors.recolor_dark",
     "colors.recolor_light",
@@ -348,6 +352,7 @@ impl Config {
             "ui.auto_reload" => self.auto_reload = as_bool(v)?,
             "ui.menubar" => self.menubar = as_bool(v)?,
             "ui.tabbar" => self.tabbar = as_bool(v)?,
+            "ui.single_instance" => self.single_instance = as_bool(v)?,
             "colors.page_background" => self.colors.page_background = as_color(v)?,
             "colors.recolor_dark" => self.colors.recolor_dark = as_color(v)?,
             "colors.recolor_light" => self.colors.recolor_light = as_color(v)?,

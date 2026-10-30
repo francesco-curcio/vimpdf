@@ -514,6 +514,8 @@ impl VimpdfApp {
             Command::PrevTab(n) => self.cycle_tab(ctx, -i64::from(n)),
             Command::GotoTab(n) => self.goto_tab(ctx, n),
             Command::NewTab => self.new_start_tab(ctx),
+            Command::DetachTab => self.detach_tab(ctx),
+            Command::AttachTab => self.attach_tab(ctx),
             Command::QuitAll => self.quit_all(ctx),
             Command::ForceQuitAll => self.force_quit_all(ctx),
             Command::AwaitHighlight => {} // handled by the key state
@@ -996,11 +998,21 @@ impl eframe::App for VimpdfApp {
         let mut ui_commands = Vec::new();
         ui_commands.extend(start_command);
         if let Some(rect) = tabbar_rect {
-            match ui::tabbar::show(ui, rect, &self.tab_labels(), font_size) {
-                Some(ui::tabbar::TabAction::Switch(i)) => ui_commands.push(Command::GotoTab(i + 1)),
-                Some(ui::tabbar::TabAction::Close(i)) => {
+            let main = tabs::is_main_window();
+            use ui::tabbar::TabAction;
+            match ui::tabbar::show(ui, rect, &self.tab_labels(), font_size, main) {
+                Some(TabAction::Switch(i)) => ui_commands.push(Command::GotoTab(i + 1)),
+                Some(TabAction::Close(i)) => {
                     ui_commands.push(Command::GotoTab(i + 1));
                     ui_commands.push(Command::Quit);
+                }
+                Some(TabAction::Detach(i)) => {
+                    ui_commands.push(Command::GotoTab(i + 1));
+                    ui_commands.push(Command::DetachTab);
+                }
+                Some(TabAction::Attach(i)) => {
+                    ui_commands.push(Command::GotoTab(i + 1));
+                    ui_commands.push(Command::AttachTab);
                 }
                 None => {}
             }

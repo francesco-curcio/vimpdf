@@ -38,6 +38,15 @@ in the private temp dir, and a later `vimpdf file.pdf` sends the path there
 and exits. Paths from the socket, from macOS's `application:openURLs:` and
 from drag and drop all go through the same queue and open as tabs.
 
+One window is one process: windows share nothing but that socket. `:detach`
+saves the tab's reading state, starts `vimpdf --new-window <file>` (which
+restores it) and closes the tab; `:attach` saves it, sends the path over the
+socket to the listening process (the main window) and closes the tab. Unsaved
+annotations would be lost on the way (the editor's undo history and working
+copy stay in the old process), so a tab that has them doesn't move.
+`ui.single_instance = false` only stops launches from forwarding; the first
+window still listens, so `:attach` keeps working.
+
 ## Threads
 
 - **UI thread** (eframe): input, layout arithmetic, texture upload, drawing.

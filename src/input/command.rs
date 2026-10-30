@@ -189,6 +189,10 @@ pub enum Command {
     GotoTab(usize),
     /// A new tab with the start page.
     NewTab,
+    /// `:detach`: move the tab to a new window.
+    DetachTab,
+    /// `:attach`: move the tab to the main window.
+    AttachTab,
     /// `:qa`: close every tab and quit.
     QuitAll,
     /// `:qa!`: the same, discarding unsaved annotations.
@@ -273,6 +277,8 @@ const SIMPLE: &[(&str, Command)] = &[
     ("quit", Command::Quit),
     ("next_tab", Command::NextTab),
     ("new_tab", Command::NewTab),
+    ("detach_tab", Command::DetachTab),
+    ("attach_tab", Command::AttachTab),
     ("quit_all", Command::QuitAll),
 ];
 
@@ -430,7 +436,9 @@ impl Command {
 pub const EX_COMMANDS: &[&str] = &[
     "annotated",
     "annotations",
+    "attach",
     "config",
+    "detach",
     "edit",
     "edit!",
     "help",
@@ -501,6 +509,8 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
             Err(_) => return Err(format!(":{word} takes a tab number")),
         },
         "tabp" | "tabprevious" | "tabN" | "tabNext" => Command::PrevTab(1),
+        "detach" => Command::DetachTab,
+        "attach" => Command::AttachTab,
         "tabe" | "tabedit" | "tabnew" | "tabopen" if rest.is_empty() => Command::NewTab,
         "tabe" | "tabedit" | "tabnew" | "tabopen" => Command::Open(expand_tilde(rest)),
         "w!" | "write!" => Command::WriteForce,
@@ -592,6 +602,8 @@ mod tests {
         assert_eq!(ex("tabe a.pdf"), Command::Open("a.pdf".into()));
         assert_eq!(ex("e a.pdf"), Command::Edit("a.pdf".into()));
         assert_eq!(ex("tabnew"), Command::NewTab);
+        assert_eq!(ex("detach"), Command::DetachTab);
+        assert_eq!(ex("attach"), Command::AttachTab);
         assert_eq!(ex("tabn"), Command::NextTab);
         assert_eq!(ex("tabn 4"), Command::GotoTab(4));
         assert_eq!(ex("tabp"), Command::PrevTab(1));

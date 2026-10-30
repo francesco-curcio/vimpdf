@@ -85,23 +85,25 @@ fn run(args: Args) -> Result<()> {
         None => None,
     };
 
-    // Hand the file to a running vimpdf, which opens it in a tab.
+    let config_path = args.config.or_else(Config::default_path);
+    let (config, warnings) = match &config_path {
+        Some(p) => Config::load(p),
+        None => (Config::default(), Vec::new()),
+    };
+
+    // Hand the file to a running vimpdf, which opens it in a tab. Listen
+    // even without `ui.single_instance`, so other windows can `:attach`.
     #[cfg(unix)]
     {
         if let Some((path, _)) = &initial
             && !args.new_window
+            && config.single_instance
             && platform::instance::forward(path)
         {
             return Ok(());
         }
         platform::instance::listen();
     }
-
-    let config_path = args.config.or_else(Config::default_path);
-    let (config, warnings) = match &config_path {
-        Some(p) => Config::load(p),
-        None => (Config::default(), Vec::new()),
-    };
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()

@@ -8,6 +8,7 @@ font_size = 14
 statusbar = true
 menubar = true        # File / Edit / View menus; gm opens them even when hidden
 tabbar = true         # the tab bar (gt / gT switch tabs either way)
+single_instance = true  # files opened while vimpdf runs become tabs; false: own window
 toolbar = false
 start_maximised = true
 recolor = false       # start in recolor (dark) mode; <C-r> toggles

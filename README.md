@@ -123,7 +123,8 @@ vimpdf --new-window paper.pdf           # a separate window, not a tab
 ```
 
 Only one vimpdf runs per user: `vimpdf paper.pdf` while it's running opens
-the file in a new tab there (on Linux and macOS alike) and exits.
+the file in a new tab there (on Linux and macOS alike) and exits. With
+`ui.single_instance = false` every file opens in its own window instead.
 
 Key notation follows vim: `<C-d>` is Ctrl+d, `<C-F>` is Ctrl+Shift+f,
 `<S-Space>` is Shift+Space. Counts work as in vim: `5j`, `3J`, `12G`, `3+`.
@@ -206,6 +207,13 @@ Each document opens in a tab; the tab bar at the top shows them numbered
 click. Each tab keeps its own position, selection, search, jumps and
 annotations. Opening a file that is already open switches to its tab.
 
+A tab can move to a window of its own: `:detach`, or right-click the tab →
+Move to new window (also in the File menu). The new window opens at the same
+page, zoom and marks. `:attach` (Move to main window) sends it back to the
+main window, the one files opened from outside go to, and closes the window
+when it was its last tab. A tab with unsaved annotations doesn't move until
+they're saved (`:w`); neither does the start page.
+
 Without a document (launched from the Dock, or `:tabnew`) the tab shows the
 start page: the recently read files, with the page you were on. `j`/`k` and
 Enter open one, or its number `1`-`9`, or a click; `:open <path>` and dropping
@@ -261,6 +269,8 @@ steps through them, `Shift+Tab` backwards.
 | `:e <path>` | Open a PDF in place of the current one |
 | `:tabnew` | New tab with the start page |
 | `:tabn [n]`, `:tabp` | Next tab (or tab n), previous tab |
+| `:detach` | Move the tab to a new window |
+| `:attach` | Move the tab to the main window (from another window) |
 | `:set <option> <value>` | Change an option for this session, e.g. `:set zoom.step 1.25`, `:set toolbar`, `:set notoolbar` |
 | `:source` | Reload the config file |
 | `:help` | Help overlay |

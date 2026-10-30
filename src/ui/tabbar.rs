@@ -16,6 +16,10 @@ pub struct TabLabel {
 pub enum TabAction {
     Switch(usize),
     Close(usize),
+    /// Move to a new window.
+    Detach(usize),
+    /// Move to the main window.
+    Attach(usize),
 }
 
 const MIN_WIDTH: f32 = 90.0;
@@ -27,8 +31,15 @@ pub fn height(font_size: f32) -> f32 {
 
 /// Draw the tabs in `rect`. Tabs share the width (up to a maximum each);
 /// names that don't fit are shortened with "…". Each shows its number, for
-/// `{n}gt`.
-pub fn show(ui: &mut egui::Ui, rect: Rect, tabs: &[TabLabel], font_size: f32) -> Option<TabAction> {
+/// `{n}gt`. A right click offers moving the tab to another window (to the
+/// main one only from other windows).
+pub fn show(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    tabs: &[TabLabel],
+    font_size: f32,
+    main_window: bool,
+) -> Option<TabAction> {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, BAR_BACKGROUND);
     let font = FontId::proportional(font_size * 0.95);
@@ -97,6 +108,20 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, tabs: &[TabLabel], font_size: f32) ->
                 );
             }
         }
+
+        response.context_menu(|ui| {
+            let mut entry = |label: &str, enabled: bool, chosen: TabAction| {
+                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                    action = Some(chosen);
+                    ui.close();
+                }
+            };
+            entry("Move to new window", tabs.len() > 1, TabAction::Detach(i));
+            if !main_window {
+                entry("Move to main window", true, TabAction::Attach(i));
+            }
+            entry("Close tab", true, TabAction::Close(i));
+        });
 
         if close.clicked() || response.clicked_by(PointerButton::Middle) {
             action = Some(TabAction::Close(i));

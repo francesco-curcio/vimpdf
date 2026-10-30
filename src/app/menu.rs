@@ -115,6 +115,10 @@ impl VimpdfApp {
                     .enabled(self.tab_count() > 1),
                 self.item("Previous tab", Command::PrevTab(1), "gT")
                     .enabled(self.tab_count() > 1),
+                self.item("Move tab to new &window", Command::DetachTab, ":detach")
+                    .enabled(self.tab_count() > 1),
+                self.item("Move tab to &main window", Command::AttachTab, ":attach")
+                    .enabled(!super::tabs::is_main_window()),
                 self.item("&Close tab", Command::Quit, ":q"),
                 self.item("&Quit", Command::QuitAll, ":qa"),
             ],

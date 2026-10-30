@@ -28,6 +28,7 @@ const MOUSE: &[(&str, &str)] = &[
         "click a tab, × or middle click",
         "switch to it (gt, {n}gt), close it (:q)",
     ),
+    ("right click a tab", "move it to another window, close it"),
 ];
 
 const EX_COMMANDS: &[(&str, &str)] = &[
@@ -35,6 +36,10 @@ const EX_COMMANDS: &[(&str, &str)] = &[
     (":open <path>", "open a file in a new tab (:tabe)"),
     (":e <path>", "open a file in place of this one"),
     (":tabnew", "new tab with the start page and recent files"),
+    (
+        ":detach  :attach",
+        "move this tab to a new window  to the main window",
+    ),
     (":q  :qa", "close this tab (the last one quits)  quit"),
     (
         ":set <option> <value>",

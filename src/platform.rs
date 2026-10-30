@@ -140,6 +140,11 @@ pub mod instance {
         }
     }
 
+    /// Whether this is the window other launches hand their files to.
+    pub fn is_main() -> bool {
+        LISTENING.load(Ordering::Relaxed)
+    }
+
     /// Remove the socket on quit, if this process made it.
     pub fn stop() {
         if LISTENING.load(Ordering::Relaxed) {

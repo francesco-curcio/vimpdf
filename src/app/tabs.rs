@@ -254,6 +254,64 @@ impl VimpdfApp {
         self.tab_switched(ctx);
     }
 
+    /// Why the active tab can't move to another window, if it can't. Its
+    /// reading position, zoom and marks go along (saved, then restored
+    /// there); unsaved annotations would not.
+    fn cannot_move(&self) -> Option<&'static str> {
+        if crate::welcome::is_welcome(&self.view.path) {
+            Some("The start page stays in this window")
+        } else if self.annots.unsaved {
+            Some("Unsaved annotations: :w saves them, then the tab can move")
+        } else {
+            None
+        }
+    }
+
+    /// `:detach`: move the active tab to a new window (another vimpdf).
+    pub(super) fn detach_tab(&mut self, ctx: &egui::Context) {
+        if self.tab_count() == 1 {
+            return self.info("Only one tab: it already has the window to itself");
+        }
+        if let Some(why) = self.cannot_move() {
+            return self.error(why);
+        }
+        self.save_state();
+        let spawned = own_executable().and_then(|exe| {
+            let mut cmd = std::process::Command::new(exe);
+            cmd.arg("--new-window");
+            if let Some(config) = &self.config_path {
+                cmd.arg("--config").arg(config);
+            }
+            cmd.arg(&self.view.path)
+                .stdin(std::process::Stdio::null())
+                .spawn()
+        });
+        match spawned {
+            Ok(mut child) => {
+                // Reap it when it quits, so it doesn't linger as a zombie.
+                std::thread::spawn(move || child.wait());
+                self.close_tab(ctx);
+            }
+            Err(e) => self.error(format!("cannot open a new window: {e}")),
+        }
+    }
+
+    /// `:attach`: move the active tab to the main window (the one files
+    /// opened from outside go to). The last tab closes this window.
+    pub(super) fn attach_tab(&mut self, ctx: &egui::Context) {
+        if is_main_window() {
+            return self.info("This is the main window");
+        }
+        if let Some(why) = self.cannot_move() {
+            return self.error(why);
+        }
+        self.save_state();
+        if !send_to_main_window(&self.view.path) {
+            return self.error("No main window to move the tab to");
+        }
+        self.close_tab(ctx);
+    }
+
     /// Index of a tab with unsaved annotations, the active one first.
     fn unsaved_tab(&self) -> Option<usize> {
         if self.annots.unsaved {
@@ -297,5 +355,37 @@ impl VimpdfApp {
     pub(super) fn save_all_states(&mut self) {
         self.save_state();
         self.for_each_parked(|app| app.save_state());
+    }
+}
+
+/// Whether this window receives the files opened from outside.
+pub(super) fn is_main_window() -> bool {
+    #[cfg(unix)]
+    return crate::platform::instance::is_main();
+    #[cfg(not(unix))]
+    return true;
+}
+
+fn send_to_main_window(path: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    return crate::platform::instance::forward(path);
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// This program's file. After a reinstall while running, Linux names the
+/// replaced file "<path> (deleted)": start the new one at `<path>` instead.
+fn own_executable() -> std::io::Result<PathBuf> {
+    let exe = std::env::current_exe()?;
+    if exe.exists() {
+        return Ok(exe);
+    }
+    let name = exe.to_string_lossy();
+    match name.strip_suffix(" (deleted)") {
+        Some(path) => Ok(PathBuf::from(path)),
+        None => Ok(exe),
     }
 }
