@@ -33,6 +33,7 @@ const MOUSE: &[(&str, &str)] = &[
 
 const EX_COMMANDS: &[(&str, &str)] = &[
     (":<n>", "go to page n"),
+    (":zoom <percent>", "zoom to that percentage (:zoom 150)"),
     (":open <path>", "open a file in a new tab (:tabe)"),
     (":e <path>", "open a file in place of this one"),
     (":tabnew", "new tab with the start page and recent files"),

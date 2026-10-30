@@ -192,7 +192,7 @@ two idle seconds (`mouse.hide_after`) and comes back when the mouse moves.
 | Click the page number in the status bar | Go to page | `:<n>` |
 | Click an outline entry | Jump to it (panel stays open) | `<Tab>`, `j`/`k`, Enter |
 | Drag the outline's right edge | Resize it | `<` `>` in the outline |
-| Toolbar buttons | Zoom, fit, go to page, help | `+` `-` `s` `a` `:<n>` `?` |
+| Toolbar buttons | Zoom (the field shows the zoom %; type one and Enter), fit, go to page, help | `+` `-` `:zoom <n>` `s` `a` `:<n>` `?` |
 
 Internal links jump to the exact destination (a citation lands on the
 reference, with a little context above it). External links open in the
@@ -265,6 +265,7 @@ steps through them, `Shift+Tab` backwards.
 | Command | Action |
 | --- | --- |
 | `:<n>` | Go to page n |
+| `:zoom <percent>` | Zoom to that percentage, e.g. `:zoom 150` |
 | `:open <path>`, `:o`, `:tabe` | Open a PDF in a new tab, or switch to its tab (relative paths are relative to the current file; `~` works) |
 | `:e <path>` | Open a PDF in place of the current one |
 | `:tabnew` | New tab with the start page |

@@ -414,6 +414,7 @@ impl VimpdfApp {
             Command::ZoomIn(n) => vp.zoom_by(zoom_step.powi(n as i32), cx, cy),
             Command::ZoomOut(n) => vp.zoom_by(zoom_step.powi(-(n as i32)), cx, cy),
             Command::ZoomReset => vp.zoom_to(1.0, cx, cy),
+            Command::ZoomTo(percent) => vp.zoom_to(percent / 100.0, cx, cy),
             Command::ZoomBy { factor, x, y } => vp.zoom_by(factor, x, y),
             Command::FitWidth => vp.fit_width(layout, PAGE_MARGIN),
             Command::FitPage => vp.fit_page(layout, PAGE_MARGIN),
@@ -1018,7 +1019,14 @@ impl eframe::App for VimpdfApp {
             }
         }
         if let Some(rect) = toolbar_rect {
-            ui_commands.extend(self.toolbar.show(ui, rect, page, pages, font_size));
+            ui_commands.extend(self.toolbar.show(
+                ui,
+                rect,
+                page,
+                pages,
+                vp.zoom * 100.0,
+                font_size,
+            ));
         }
         match (bottom_rect, self.mode) {
             (Some(rect), Mode::Command) => match self.cmdline.show(

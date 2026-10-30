@@ -32,6 +32,8 @@ pub enum Command {
     ZoomOut(u32),
     /// Zoom to 100%.
     ZoomReset,
+    /// `:zoom <percent>`: zoom to that percentage.
+    ZoomTo(f32),
     /// Multiply the zoom, anchored at a point in view coordinates
     /// (pinch / Cmd+wheel).
     ZoomBy {
@@ -461,6 +463,7 @@ pub const EX_COMMANDS: &[&str] = &[
     "tabprevious",
     "wq",
     "write",
+    "zoom",
     "write!",
 ];
 
@@ -525,6 +528,10 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
         "redact" if rest.is_empty() => Command::ApplyRedactions(None),
         "redact" => Command::ApplyRedactions(Some(expand_tilde(rest))),
         "redact-matches" => Command::RedactMatches,
+        "zoom" => match rest.trim_end_matches('%').trim().parse::<f32>() {
+            Ok(p) if p > 0.0 => Command::ZoomTo(p),
+            _ => return Err(":zoom takes a percentage, e.g. :zoom 150".into()),
+        },
         "properties" | "info" => Command::ToggleProperties,
         "config" => Command::EditConfig,
         "o" | "open" | "e" | "edit" if rest.is_empty() => {
@@ -697,6 +704,10 @@ mod tests {
         );
         assert!(parse_ex("open").is_err());
         assert_eq!(parse_ex("zoom_in 2"), Ok(Some(Command::ZoomIn(2))));
+        assert_eq!(parse_ex("zoom 150"), Ok(Some(Command::ZoomTo(150.0))));
+        assert_eq!(parse_ex("zoom 80%"), Ok(Some(Command::ZoomTo(80.0))));
+        assert!(parse_ex("zoom").is_err());
+        assert!(parse_ex("zoom big").is_err());
         assert_eq!(
             parse_ex("search Standard Model"),
             Ok(Some(Command::Search("Standard Model".into())))
