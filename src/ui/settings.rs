@@ -101,6 +101,12 @@ const SECTIONS: &[(&str, &[Setting])] = &[
                 "<C-r> toggles dark mode.",
             ),
             s(
+                "ui.recolor_keep_hue",
+                "Dark mode keeps colours",
+                Kind::Bool,
+                "Off: dark mode turns the page monochrome.",
+            ),
+            s(
                 "ui.auto_reload",
                 "Reload changed files",
                 Kind::Bool,

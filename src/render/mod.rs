@@ -43,17 +43,40 @@ impl ScaleKey {
 pub struct Recolor {
     pub dark: [u8; 3],
     pub light: [u8; 3],
+    /// Keep colours' hue (a red link stays red), inverting only lightness.
+    pub keep_hue: bool,
 }
 
 /// Map each RGB pixel's lightness onto the dark → light range (inverted).
+/// With `keep_hue`, a coloured pixel keeps its difference from grey on top
+/// of that, scaled down only as far as needed to stay in range, so hues
+/// survive (like zathura's recolor-keephue). Greys come out the same
+/// either way.
 pub fn recolor(rgb: &mut [u8], rc: Recolor) {
     let (pixels, _) = rgb.as_chunks_mut::<3>();
     for px in pixels {
-        let [r, g, b] = px.map(u32::from);
+        let [r, g, b] = px.map(i32::from);
         let lum = (299 * r + 587 * g + 114 * b) / 1000;
         let t = 255 - lum; // 0 for white, 255 for black
-        for (c, (d, l)) in px.iter_mut().zip(rc.dark.into_iter().zip(rc.light)) {
-            *c = ((u32::from(d) * (255 - t) + u32::from(l) * t) / 255) as u8;
+        let mut base = [0i32; 3];
+        for (o, (d, l)) in base.iter_mut().zip(rc.dark.into_iter().zip(rc.light)) {
+            *o = (i32::from(d) * (255 - t) + i32::from(l) * t) / 255;
+        }
+        let chroma = [r - lum, g - lum, b - lum];
+        if !rc.keep_hue || chroma.iter().all(|c| c.abs() <= 2) {
+            *px = base.map(|c| c as u8);
+            continue;
+        }
+        // Largest share of the chroma that keeps every channel in 0..=255.
+        let mut share = 1.0f32;
+        for (b, c) in base.iter().zip(chroma) {
+            let room = if c > 0 { 255 - b } else { *b };
+            if c != 0 {
+                share = share.min(room as f32 / c.abs() as f32);
+            }
+        }
+        for ((o, b), c) in px.iter_mut().zip(base).zip(chroma) {
+            *o = (b as f32 + c as f32 * share).round().clamp(0.0, 255.0) as u8;
         }
     }
 }
@@ -263,12 +286,32 @@ mod tests {
         let rc = Recolor {
             dark: [30, 30, 30],
             light: [212, 212, 212],
+            keep_hue: false,
         };
         let mut px = vec![255, 255, 255, 0, 0, 0, 128, 128, 128];
         recolor(&mut px, rc);
         assert_eq!(&px[0..3], &[30, 30, 30], "white paper becomes dark");
         assert_eq!(&px[3..6], &[212, 212, 212], "black text becomes light");
         assert!(px[6] > 30 && px[6] < 212);
+    }
+
+    #[test]
+    fn keeping_the_hue_leaves_greys_alone_and_colours_coloured() {
+        let rc = Recolor {
+            dark: [30, 30, 30],
+            light: [212, 212, 212],
+            keep_hue: true,
+        };
+        let mut px = vec![255, 255, 255, 0, 0, 0, 200, 0, 0, 0, 0, 255];
+        recolor(&mut px, rc);
+        assert_eq!(&px[0..3], &[30, 30, 30], "white paper becomes dark");
+        assert_eq!(&px[3..6], &[212, 212, 212], "black text becomes light");
+        let [r, g, b] = [px[6], px[7], px[8]];
+        assert!(r > g + 40 && g == b, "dark red stays red: {r} {g} {b}");
+        let [r, g, b] = [px[9], px[10], px[11]];
+        assert!(b > r + 40 && r == g, "blue stays blue: {r} {g} {b}");
+        // Lightness is inverted: a dark red comes out lighter than it was.
+        assert!(px[6] > 200);
     }
 
     #[test]

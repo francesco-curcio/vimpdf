@@ -33,6 +33,7 @@ unambiguous (`toolbar`). Booleans also accept `:set toolbar` / `:set notoolbar`.
 | `single_instance` | `true` | Open files in a new tab of the running vimpdf. `false`: each file gets its own window (as with `--new-window`); `:attach` still moves a tab to the first window. Read when vimpdf is launched. (Unix only.) |
 | `start_maximised` | `true` | Open the window filling the screen's usable area. |
 | `recolor` | `false` | Start in recolor (dark) mode; `<C-r>` toggles. |
+| `recolor_keep_hue` | `true` | Recolor inverts only lightness and keeps colours (red links, coloured plots and highlights stay distinguishable). `false`: the page becomes monochrome, from `recolor_dark` to `recolor_light`. |
 | `auto_reload` | `true` | Reload the document when the file changes on disk. |
 
 ### `[colors]`

@@ -78,6 +78,8 @@ pub struct Config {
     pub start_maximised: bool,
     /// Start in recolor (dark) mode.
     pub recolor: bool,
+    /// Recolor keeps colours' hue instead of making the page monochrome.
+    pub recolor_keep_hue: bool,
     /// Reload the document when the file changes on disk.
     pub auto_reload: bool,
     /// Show the File / Edit / View menu bar.
@@ -128,6 +130,7 @@ impl Default for Config {
             toolbar: false,
             start_maximised: true,
             recolor: false,
+            recolor_keep_hue: true,
             auto_reload: true,
             menubar: true,
             tabbar: true,
@@ -186,6 +189,7 @@ pub const OPTIONS: &[&str] = &[
     "ui.toolbar",
     "ui.start_maximised",
     "ui.recolor",
+    "ui.recolor_keep_hue",
     "ui.auto_reload",
     "ui.menubar",
     "ui.tabbar",
@@ -436,6 +440,7 @@ impl Config {
             "ui.toolbar" => self.toolbar = as_bool(v)?,
             "ui.start_maximised" => self.start_maximised = as_bool(v)?,
             "ui.recolor" => self.recolor = as_bool(v)?,
+            "ui.recolor_keep_hue" => self.recolor_keep_hue = as_bool(v)?,
             "ui.auto_reload" => self.auto_reload = as_bool(v)?,
             "ui.menubar" => self.menubar = as_bool(v)?,
             "ui.tabbar" => self.tabbar = as_bool(v)?,
@@ -540,6 +545,7 @@ impl Config {
             "ui.toolbar" => b(self.toolbar),
             "ui.start_maximised" => b(self.start_maximised),
             "ui.recolor" => b(self.recolor),
+            "ui.recolor_keep_hue" => b(self.recolor_keep_hue),
             "ui.auto_reload" => b(self.auto_reload),
             "ui.menubar" => b(self.menubar),
             "ui.tabbar" => b(self.tabbar),

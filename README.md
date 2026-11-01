@@ -455,7 +455,9 @@ properties) is not changed.
 
 - **Recolor** (`<C-r>`): pages are drawn with light text on a dark background
   (`colors.recolor_dark` / `colors.recolor_light`). `ui.recolor = true` starts
-  in this mode.
+  in this mode. Colours keep their hue (red links, coloured plots and
+  highlights stay distinguishable); `ui.recolor_keep_hue = false` makes the
+  page monochrome instead.
 - **Outline** (`<Tab>`): the document's table of contents, opened at the
   section you're reading. `j`/`k` (or arrows, `<C-d>`/`<C-u>`, `g`/`G`) move,
   Enter (or `l`, `o`, Space) jumps and closes, `Esc`/`<Tab>`/`q`/`h` close.

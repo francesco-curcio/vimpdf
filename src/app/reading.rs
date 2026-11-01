@@ -49,6 +49,7 @@ impl VimpdfApp {
         self.config.recolor.then(|| Recolor {
             dark: rgb(self.config.colors.recolor_dark),
             light: rgb(self.config.colors.recolor_light),
+            keep_hue: self.config.recolor_keep_hue,
         })
     }
 
