@@ -31,6 +31,7 @@ unambiguous (`toolbar`). Booleans also accept `:set toolbar` / `:set notoolbar`.
 | `menubar` | `true` | Show the File / Edit / View menu bar (`gm` opens it even when hidden). |
 | `tabbar` | `true` | Show the tab bar. Tabs work the same without it (`gt`, `gT`, `{n}gt`). |
 | `scrollbar` | `true` | Show the scrollbar on the right of the pages. Drag it (the page number shows beside it) or press the track to jump there. Also in View → Scrollbar. |
+| `restore_tabs` | `true` | At launch, reopen the tabs that were open when vimpdf last quit (the main window's; detached windows aren't remembered). A file vimpdf is launched with is added and shown. |
 | `single_instance` | `true` | Open files in a new tab of the running vimpdf. `false`: each file gets its own window (as with `--new-window`); `:attach` still moves a tab to the first window. Read when vimpdf is launched. (Unix only.) |
 | `start_maximised` | `true` | Open the window filling the screen's usable area. |
 | `recolor` | `false` | Start in recolor (dark) mode; `<C-r>` toggles. |
@@ -73,6 +74,7 @@ Colours are `"#rrggbb"` or `"#rrggbbaa"`.
 | `drag` | `"select"` | What dragging on a page does: `"select"` text or `"pan"` the view. |
 | `pan_modifier` | `"alt"` | Holding it swaps the drag behaviour (pans when `drag = "select"`, selects when `"pan"`). Middle-drag always pans. |
 | `copy_on_select` | `false` | Copy mouse selections to the clipboard as soon as the drag ends. |
+| `link_preview` | `true` | Resting the pointer on an internal link (citation, figure, equation) shows where it leads in a popup. |
 | `hide_after` | `2` | Hide the pointer over the pages after this many seconds without moving it; `0` never hides it. Moving the mouse shows it again. |
 
 ### `[outline]`
@@ -166,6 +168,7 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `undo` | `u` (normal and visual mode) |
 | `write [path]` | — (`:w`, `:w <path>`) |
 | `redact_area` | `X` |
+| `copy_area` | `Y` (`:copyimage`): copy a box as a 300 dpi image |
 | `note` | `C` |
 | `text_box` | `T` |
 | `delete_annotation` | `D` |

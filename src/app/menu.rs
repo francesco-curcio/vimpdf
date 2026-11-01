@@ -143,6 +143,7 @@ impl VimpdfApp {
                 Item::Separator,
                 self.item("Mark for &redaction", Command::RedactSelection, "x")
                     .enabled(has_sel),
+                self.item("Copy area as &image…", Command::CopyArea, "Y"),
                 self.item("Mark &area for redaction", Command::RedactArea, "X"),
                 self.item(
                     "Mark search ma&tches for redaction",

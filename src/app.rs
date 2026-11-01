@@ -24,6 +24,7 @@ mod annotations;
 mod hints;
 mod menu;
 mod place;
+mod preview;
 mod reading;
 mod redact;
 mod searching;
@@ -94,6 +95,11 @@ pub struct VimpdfApp {
     menu_return: Mode,
     show_props: bool,
     settings: Option<ui::settings::SettingsWindow>,
+    /// The tab to show once the last session's tabs are open.
+    restore_active: Option<PathBuf>,
+    /// An image to put on the clipboard (`Y`), sent at the end of the frame.
+    clipboard_image: Option<egui::ColorImage>,
+    link_preview: preview::LinkPreview,
     /// When the mouse last moved, to hide an idle pointer.
     pointer_active: Instant,
     /// The outline layout as last written to `ui.toml`.
@@ -163,6 +169,9 @@ impl VimpdfApp {
             },
             show_props: false,
             settings: None,
+            restore_active: None,
+            clipboard_image: None,
+            link_preview: Default::default(),
         };
         app.install_font(ctx, &mut warnings);
         app.restore_ui_state();
@@ -174,6 +183,16 @@ impl VimpdfApp {
     /// Switch to this present mode on the first frame.
     pub fn with_present(mut self, present: Option<eframe::SurfaceConfig>) -> Self {
         self.present = present;
+        self
+    }
+
+    /// Open `tabs` (the last session's) once the window is up, then show
+    /// `active`.
+    pub fn with_restored_tabs(mut self, tabs: Vec<PathBuf>, active: Option<PathBuf>) -> Self {
+        if !tabs.is_empty() {
+            crate::platform::push_opened(tabs);
+            self.restore_active = active;
+        }
         self
     }
 
@@ -612,6 +631,7 @@ impl VimpdfApp {
             Command::ToggleMenubar => self.config.menubar = !self.config.menubar,
             Command::ToggleScrollbar => self.config.scrollbar = !self.config.scrollbar,
             Command::EditConfig => self.edit_config(),
+            Command::CopyArea => self.start_copy_area(),
             Command::OpenSettings => {
                 if self.settings.is_none() {
                     let file = self
@@ -708,6 +728,7 @@ impl VimpdfApp {
         for path in paths {
             self.execute(Command::Open(path), ctx);
         }
+        self.show_restored_tab(ctx);
         ctx.send_viewport_cmd(ViewportCommand::Focus);
         crate::platform::activate();
     }
@@ -1064,6 +1085,7 @@ impl eframe::App for VimpdfApp {
         if let Some(thumb) = scrollbar_drag {
             self.draw_scrollbar_page(&painter, thumb, &vp);
         }
+        self.show_link_preview(&ctx, area, &vp);
         let mut start_command = None;
         if self.start.is_some() {
             start_command = self.show_start_screen(ui, area);
@@ -1260,10 +1282,14 @@ impl eframe::App for VimpdfApp {
             ctx.request_repaint();
         }
         ctx.set_cursor_icon(self.hide_idle_pointer(&ctx, area, cursor));
+        if let Some(image) = self.clipboard_image.take() {
+            ctx.copy_image(image);
+        }
     }
 
     fn on_exit(&mut self) {
         self.save_all_states();
+        self.save_session();
         crate::annotate::remove_own_work_dirs();
         #[cfg(unix)]
         crate::platform::instance::stop();

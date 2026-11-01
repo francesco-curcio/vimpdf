@@ -146,6 +146,8 @@ pub enum Command {
     RedactSelection,
     /// Mark a rectangular area for redaction (`X`).
     RedactArea,
+    /// Draw a box and copy it as an image (`Y`).
+    CopyArea,
     /// Mark every match of the current search for redaction.
     RedactMatches,
     /// Apply all redaction marks, writing a new file.
@@ -265,6 +267,7 @@ const SIMPLE: &[(&str, Command)] = &[
     ("properties", Command::ToggleProperties),
     ("redact", Command::RedactSelection),
     ("redact_area", Command::RedactArea),
+    ("copy_area", Command::CopyArea),
     ("note", Command::PlaceNote),
     ("text_box", Command::PlaceText),
     ("redact_matches", Command::RedactMatches),
@@ -445,6 +448,7 @@ pub const EX_COMMANDS: &[&str] = &[
     "annotations",
     "attach",
     "config",
+    "copyimage",
     "detach",
     "edit",
     "edit!",
@@ -534,6 +538,7 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
         "redact" if rest.is_empty() => Command::ApplyRedactions(None),
         "redact" => Command::ApplyRedactions(Some(expand_tilde(rest))),
         "redact-matches" => Command::RedactMatches,
+        "copyimage" | "copy-image" => Command::CopyArea,
         "zoom" => match rest.trim_end_matches('%').trim().parse::<f32>() {
             Ok(p) if p > 0.0 => Command::ZoomTo(p),
             _ => return Err(":zoom takes a percentage, e.g. :zoom 150".into()),

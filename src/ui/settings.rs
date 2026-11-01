@@ -117,6 +117,12 @@ const SECTIONS: &[(&str, &[Setting])] = &[
                 Kind::Bool,
                 "Files opened while vimpdf runs become tabs of the running window; off: each gets its own window. Takes effect at the next launch.",
             ),
+            s(
+                "ui.restore_tabs",
+                "Reopen last tabs",
+                Kind::Bool,
+                "At launch, reopen the tabs that were open when vimpdf last closed.",
+            ),
         ],
     ),
     (
@@ -201,6 +207,12 @@ const SECTIONS: &[(&str, &[Setting])] = &[
                 "Copy on select",
                 Kind::Bool,
                 "Copy text as soon as it is selected.",
+            ),
+            s(
+                "mouse.link_preview",
+                "Link preview",
+                Kind::Bool,
+                "Rest the pointer on a link inside the document to see where it leads.",
             ),
             s(
                 "mouse.hide_after",

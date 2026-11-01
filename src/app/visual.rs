@@ -647,6 +647,9 @@ impl VimpdfApp {
                         if item(ui, "Add text here", "T", true) {
                             chosen = Some(Command::AddTextAt { page, x, y });
                         }
+                        if item(ui, "Copy area as image…", "Y", true) {
+                            chosen = Some(Command::CopyArea);
+                        }
                     }
                     if let Some(target) = link {
                         ui.separator();

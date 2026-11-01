@@ -163,6 +163,40 @@ impl VimpdfApp {
         self.switch_tab(ctx, n - 1);
     }
 
+    /// Remember the open tabs for the next launch (`ui.restore_tabs`). Only
+    /// the main window does: detached windows come and go.
+    pub(super) fn save_session(&self) {
+        if !self.config.restore_tabs || !is_main_window() {
+            return;
+        }
+        let mut session = crate::state::Session::default();
+        for (i, slot) in self.tabs.parked.iter().enumerate() {
+            let path = slot.as_ref().map_or(&self.view.path, |t| &t.view.path);
+            if crate::welcome::is_welcome(path) {
+                continue;
+            }
+            if i == self.tabs.active {
+                session.active = session.tabs.len();
+            }
+            session.tabs.push(path.clone());
+        }
+        if let Some(dir) = crate::state::state_dir()
+            && let Err(e) = crate::state::save_session(&dir, &session)
+        {
+            tracing::warn!("cannot save the open tabs: {e:#}");
+        }
+    }
+
+    /// After the tabs of the last session were queued for opening: show the
+    /// one that was active.
+    pub(super) fn show_restored_tab(&mut self, ctx: &egui::Context) {
+        if let Some(path) = self.restore_active.take()
+            && let Some(i) = self.tab_with_path(&path)
+        {
+            self.switch_tab(ctx, i);
+        }
+    }
+
     /// Reset what doesn't carry over to another document.
     fn tab_switched(&mut self, ctx: &egui::Context) {
         self.keys.reset();
@@ -173,6 +207,7 @@ impl VimpdfApp {
         ctx.send_viewport_cmd(ViewportCommand::Title(crate::welcome::display_name(
             &self.view.path,
         )));
+        self.save_session();
         ctx.request_repaint();
     }
 

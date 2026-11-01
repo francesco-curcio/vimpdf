@@ -90,6 +90,8 @@ pub struct Config {
     pub scrollbar: bool,
     /// Files opened while vimpdf runs become tabs of the running window.
     pub single_instance: bool,
+    /// Reopen the tabs of the last session at launch.
+    pub restore_tabs: bool,
     pub colors: Colors,
     pub scroll_step: f32,
     pub smooth_scroll: bool,
@@ -99,6 +101,8 @@ pub struct Config {
     pub pan_modifier: Modifier,
     pub zoom_modifier: Modifier,
     pub copy_on_select: bool,
+    /// Show where an internal link leads when the pointer rests on it.
+    pub link_preview: bool,
     /// Hide the mouse pointer over the pages after this many idle seconds;
     /// 0 never hides it.
     pub hide_pointer_after: f32,
@@ -136,6 +140,7 @@ impl Default for Config {
             tabbar: true,
             scrollbar: true,
             single_instance: true,
+            restore_tabs: true,
             colors: Colors {
                 page_background: c("#ffffff"),
                 recolor_dark: c("#1e1e1e"),
@@ -153,6 +158,7 @@ impl Default for Config {
             pan_modifier: Modifier::Alt,
             zoom_modifier: Modifier::Cmd,
             copy_on_select: false,
+            link_preview: true,
             hide_pointer_after: 2.0,
             outline_pinned: false,
             outline_width: 320.0,
@@ -195,6 +201,7 @@ pub const OPTIONS: &[&str] = &[
     "ui.tabbar",
     "ui.scrollbar",
     "ui.single_instance",
+    "ui.restore_tabs",
     "colors.page_background",
     "colors.recolor_dark",
     "colors.recolor_light",
@@ -210,6 +217,7 @@ pub const OPTIONS: &[&str] = &[
     "mouse.pan_modifier",
     "mouse.zoom_modifier",
     "mouse.copy_on_select",
+    "mouse.link_preview",
     "mouse.hide_after",
     "outline.pinned",
     "outline.width",
@@ -446,6 +454,7 @@ impl Config {
             "ui.tabbar" => self.tabbar = as_bool(v)?,
             "ui.scrollbar" => self.scrollbar = as_bool(v)?,
             "ui.single_instance" => self.single_instance = as_bool(v)?,
+            "ui.restore_tabs" => self.restore_tabs = as_bool(v)?,
             "colors.page_background" => self.colors.page_background = as_color(v)?,
             "colors.recolor_dark" => self.colors.recolor_dark = as_color(v)?,
             "colors.recolor_light" => self.colors.recolor_light = as_color(v)?,
@@ -480,6 +489,7 @@ impl Config {
             "mouse.pan_modifier" => self.pan_modifier = as_modifier(v)?,
             "mouse.zoom_modifier" => self.zoom_modifier = as_modifier(v)?,
             "mouse.copy_on_select" => self.copy_on_select = as_bool(v)?,
+            "mouse.link_preview" => self.link_preview = as_bool(v)?,
             "mouse.hide_after" => self.hide_pointer_after = as_num(v, 0.0, 3600.0)?,
             "outline.pinned" => self.outline_pinned = as_bool(v)?,
             "outline.width" => {
@@ -551,6 +561,7 @@ impl Config {
             "ui.tabbar" => b(self.tabbar),
             "ui.scrollbar" => b(self.scrollbar),
             "ui.single_instance" => b(self.single_instance),
+            "ui.restore_tabs" => b(self.restore_tabs),
             "colors.page_background" => c(self.colors.page_background),
             "colors.recolor_dark" => c(self.colors.recolor_dark),
             "colors.recolor_light" => c(self.colors.recolor_light),
@@ -573,6 +584,7 @@ impl Config {
             "mouse.pan_modifier" => m(self.pan_modifier),
             "mouse.zoom_modifier" => m(self.zoom_modifier),
             "mouse.copy_on_select" => b(self.copy_on_select),
+            "mouse.link_preview" => b(self.link_preview),
             "mouse.hide_after" => num(self.hide_pointer_after),
             "outline.pinned" => b(self.outline_pinned),
             "outline.width" => num(self.outline_width),

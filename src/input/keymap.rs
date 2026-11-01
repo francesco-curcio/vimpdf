@@ -239,6 +239,7 @@ impl Keymap {
             ("u", Undo),
             ("<C-a>", ToggleAnnotations),
             ("X", RedactArea),
+            ("Y", CopyArea),
             ("C", PlaceNote),
             ("T", PlaceText),
             ("D", DeleteHints),

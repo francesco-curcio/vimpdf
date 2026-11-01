@@ -10,6 +10,7 @@ menubar = true        # File / Edit / View menus; gm opens them even when hidden
 tabbar = true         # the tab bar (gt / gT switch tabs either way)
 scrollbar = true      # the scrollbar on the right of the pages
 single_instance = true  # files opened while vimpdf runs become tabs; false: own window
+restore_tabs = true   # reopen the last session's tabs at launch
 toolbar = false
 start_maximised = true
 recolor = false       # start in recolor (dark) mode; <C-r> toggles
@@ -38,6 +39,7 @@ zoom_modifier = "cmd"   # "cmd" | "ctrl" | "alt" | "shift"; pinch always zooms
 drag = "select"         # "select" | "pan"
 pan_modifier = "alt"
 copy_on_select = false
+link_preview = true   # rest the pointer on a link to see where it leads
 hide_after = 2          # hide the pointer over the pages after 2 idle seconds; 0 = never
 
 [outline]

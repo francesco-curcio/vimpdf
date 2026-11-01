@@ -1,6 +1,7 @@
 //! Placing a box on the page, from the keyboard or with the mouse: a
-//! redaction area (`X`), a sticky note (`C`), a text box (`T`), or moving one
-//! of these (`m` in the annotations panel, or the right-click menu).
+//! redaction area (`X`), a sticky note (`C`), a text box (`T`), an area to
+//! copy as an image (`Y`), or moving one of these (`m` in the annotations
+//! panel, or the right-click menu).
 
 use eframe::egui::{Pos2, Stroke, StrokeKind};
 
@@ -24,6 +25,8 @@ const PLACE_BLUE: Color32 = Color32::from_rgb(51, 154, 240);
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Purpose {
     Redact,
+    /// Copy the area to the clipboard as an image.
+    CopyImage,
     Note {
         color: [u8; 3],
     },
@@ -42,6 +45,7 @@ impl Purpose {
     pub(super) fn label(self) -> &'static str {
         match self {
             Purpose::Redact => "REDACT AREA",
+            Purpose::CopyImage => "COPY AREA",
             Purpose::Note { .. } => "NOTE",
             Purpose::Text { .. } => "TEXT BOX",
             Purpose::Move { .. } => "MOVE",
@@ -53,6 +57,7 @@ impl Purpose {
     fn resizable(self) -> (bool, bool) {
         match self {
             Purpose::Redact
+            | Purpose::CopyImage
             | Purpose::Move {
                 kind: AnnotKind::Redact,
                 ..
@@ -80,6 +85,7 @@ impl Purpose {
     fn hint(self) -> &'static str {
         match self {
             Purpose::Redact => "Enter marks · Esc cancels",
+            Purpose::CopyImage => "Enter copies the image · Esc cancels",
             Purpose::Note { .. } => "Enter writes the note · Esc cancels",
             Purpose::Text { .. } => "Enter writes the text · +/- size · Esc cancels",
             Purpose::Move { .. } => "Enter moves it here · Esc cancels",
@@ -249,6 +255,7 @@ impl VimpdfApp {
         let (page, rect) = (pl.page, pl.rect);
         match pl.purpose {
             Purpose::Redact => self.request_marks(vec![(page, vec![rect])]),
+            Purpose::CopyImage => self.copy_area(page, rect),
             Purpose::Note { color } => self.write_new_note(page, rect, color),
             Purpose::Text { size, color } => self.write_new_text(page, rect, size, color),
             Purpose::Move { xref, .. } => {
@@ -440,9 +447,68 @@ pub(super) fn note_icon(painter: &egui::Painter, r: Rect, fill: Color32) {
     }
 }
 
+/// Resolution of copied images: 300 dpi (pixels per PDF point).
+const COPY_SCALE: f32 = 300.0 / 72.0;
+/// Longest side of a copied image, in pixels.
+const COPY_MAX_SIDE: f32 = 8000.0;
+
+/// The render scale and pixel region for copying `rect` (page points).
+fn copy_region(rect: TextRect) -> (f32, crate::document::PixelRect) {
+    let (w, h) = (rect.x1 - rect.x0, rect.y1 - rect.y0);
+    let scale = COPY_SCALE.min(COPY_MAX_SIDE / w.max(h).max(1.0));
+    let region = crate::document::PixelRect {
+        x: (rect.x0 * scale).floor() as u32,
+        y: (rect.y0 * scale).floor() as u32,
+        w: ((w * scale).ceil() as u32).max(1),
+        h: ((h * scale).ceil() as u32).max(1),
+    };
+    (scale, region)
+}
+
+impl VimpdfApp {
+    /// `Y`: draw a box, then copy it as an image.
+    pub(super) fn start_copy_area(&mut self) {
+        self.start_placing(Purpose::CopyImage);
+    }
+
+    /// Copy `rect` of `page` to the clipboard as an image: at 300 dpi, as
+    /// printed (annotations included, original colours even in dark mode).
+    fn copy_area(&mut self, page: usize, rect: TextRect) {
+        let (scale, region) = copy_region(rect);
+        let rendered = crate::document::PageRenderer::open(&self.view.render_source)
+            .and_then(|mut r| r.render(page, scale, region));
+        match rendered {
+            Ok(p) => {
+                let image = egui::ColorImage::from_rgb([p.width, p.height], &p.rgb);
+                // Handed to the clipboard at the end of the frame.
+                self.clipboard_image = Some(image);
+                self.info(format!(
+                    "Copied a {}×{} image of page {}",
+                    p.width,
+                    p.height,
+                    page + 1
+                ));
+            }
+            Err(e) => self.error(format!("cannot copy the area: {e:#}")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copied_images_are_300_dpi_up_to_a_size() {
+        let r = |x0, y0, x1, y1| TextRect { x0, y0, x1, y1 };
+        // A 72 × 36 pt figure (1 × 0.5 inch): 300 × 150 px.
+        let (scale, px) = copy_region(r(72.0, 144.0, 144.0, 180.0));
+        assert_eq!(scale, 300.0 / 72.0);
+        assert_eq!((px.x, px.y, px.w, px.h), (300, 600, 300, 150));
+        // A huge area is scaled down to 8000 px on its long side.
+        let (_, px) = copy_region(r(0.0, 0.0, 4000.0, 1000.0));
+        assert_eq!((px.w, px.h), (8000, 2000));
+    }
 
     #[test]
     fn font_size_steps() {

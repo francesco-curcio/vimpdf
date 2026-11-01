@@ -6,6 +6,7 @@
 //! that scrolled away are dropped before they start.
 
 pub mod cache;
+pub mod preview;
 pub mod tiles;
 
 use std::collections::{HashSet, VecDeque};

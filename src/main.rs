@@ -20,7 +20,7 @@ mod viewport;
 mod watch;
 mod welcome;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
@@ -104,6 +104,15 @@ fn run(args: Args) -> Result<()> {
         }
         platform::instance::listen();
     }
+    // The main window reopens the last session's tabs (detached windows
+    // and `--new-window` ones show just their file).
+    #[cfg(unix)]
+    let main_window = platform::instance::is_main();
+    #[cfg(not(unix))]
+    let main_window = true;
+    let session = (config.restore_tabs && main_window)
+        .then(|| state::state_dir().and_then(|d| state::load_session(&d)))
+        .flatten();
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
@@ -133,18 +142,43 @@ fn run(args: Args) -> Result<()> {
             Some(doc) => doc,
             None => initial_document(&mut warnings)?,
         };
+        let (restore, active) = restore_tabs(session, &path);
         let name = welcome::display_name(&path);
         cc.egui_ctx
             .send_viewport_cmd(eframe::egui::ViewportCommand::Title(name));
         let present = present::preferred(cc);
         Ok(Box::new(
-            VimpdfApp::new(cc, path, info, config, config_path, warnings).with_present(present),
+            VimpdfApp::new(cc, path, info, config, config_path, warnings)
+                .with_present(present)
+                .with_restored_tabs(restore, active),
         ))
     });
     let mut app = eframe::create_native("vimpdf", options, creator, &event_loop);
     event_loop
         .run_app(&mut app)
         .map_err(|e| anyhow::anyhow!("failed to run the window: {e}"))
+}
+
+/// The last session's tabs to open besides `first` (the file vimpdf was
+/// launched with, or the start page), and the tab to show: the file it was
+/// launched with, else the session's active tab. Files gone since are left
+/// out.
+fn restore_tabs(session: Option<state::Session>, first: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
+    let Some(session) = session else {
+        return (Vec::new(), None);
+    };
+    let launched_with_file = !welcome::is_welcome(first);
+    let active = if launched_with_file {
+        Some(first.to_owned())
+    } else {
+        session.tabs.get(session.active).cloned()
+    };
+    let tabs = session
+        .tabs
+        .into_iter()
+        .filter(|p| p != first && p.is_file())
+        .collect();
+    (tabs, active)
 }
 
 /// Without a command-line file: the first file the system asked us to open
@@ -170,4 +204,38 @@ fn initial_document(
     let path = welcome::write()?;
     let info = DocInfo::load(&path)?;
     Ok((path, info))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restoring_tabs_shows_the_launch_file_else_the_last_active_tab() {
+        let dir = std::env::temp_dir().join(format!("vimpdf-restore-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let [a, b, c] = ["a.pdf", "b.pdf", "c.pdf"].map(|n| dir.join(n));
+        for p in [&a, &b] {
+            std::fs::write(p, b"").unwrap();
+        }
+        let session = || {
+            Some(state::Session {
+                tabs: vec![a.clone(), b.clone(), c.clone()],
+                active: 1,
+            })
+        };
+        // Launched with b: a reopens (c is gone), b is shown.
+        assert_eq!(
+            restore_tabs(session(), &b),
+            (vec![a.clone()], Some(b.clone()))
+        );
+        // Launched without a file: both, and b was active.
+        let start = welcome::write().unwrap();
+        assert_eq!(
+            restore_tabs(session(), &start),
+            (vec![a.clone(), b.clone()], Some(b.clone()))
+        );
+        assert_eq!(restore_tabs(None, &b), (vec![], None));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

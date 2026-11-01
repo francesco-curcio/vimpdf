@@ -1,7 +1,8 @@
 //! Per-file state remembered between sessions: position, zoom, fit mode and
 //! marks. Stored in `$XDG_STATE_HOME/vimpdf/` (default `~/.local/state/vimpdf/`),
 //! one small TOML file per document, named after a hash of its path, plus
-//! `ui.toml` for the layout chosen in the app (the outline's pin and width).
+//! `ui.toml` for the layout chosen in the app (the outline's pin and width)
+//! and `session.toml` for the tabs that were open.
 
 use std::path::{Path, PathBuf};
 
@@ -251,9 +252,81 @@ pub fn save_ui(dir: &Path, ui: UiState) -> Result<()> {
     Ok(())
 }
 
+/// The tabs of the main window, in order, and which one was active.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Session {
+    pub tabs: Vec<PathBuf>,
+    pub active: usize,
+}
+
+impl Session {
+    /// Paths that aren't UTF-8 can't be written in TOML: left out.
+    fn to_toml(&self) -> String {
+        let tabs: Vec<Value> = self
+            .tabs
+            .iter()
+            .filter_map(|p| p.to_str())
+            .map(|p| Value::String(p.to_owned()))
+            .collect();
+        let mut table = Table::new();
+        table.insert("tabs".into(), Value::Array(tabs));
+        table.insert("active".into(), Value::Integer(self.active as i64));
+        table.to_string()
+    }
+
+    fn from_toml(text: &str) -> Option<Self> {
+        let table: Table = text.parse().ok()?;
+        let tabs = table
+            .get("tabs")?
+            .as_array()?
+            .iter()
+            .filter_map(|v| v.as_str().map(PathBuf::from))
+            .collect();
+        let active = table.get("active").and_then(Value::as_integer).unwrap_or(0);
+        Some(Self {
+            tabs,
+            active: usize::try_from(active).unwrap_or(0),
+        })
+    }
+}
+
+/// `session.toml` has no `path`, so `recent` and `find_copies` skip it.
+fn session_file(dir: &Path) -> PathBuf {
+    dir.join("session.toml")
+}
+
+pub fn load_session(dir: &Path) -> Option<Session> {
+    Session::from_toml(&std::fs::read_to_string(session_file(dir)).ok()?)
+}
+
+pub fn save_session(dir: &Path, session: &Session) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    let file = session_file(dir);
+    let tmp = file.with_extension("toml.tmp");
+    std::fs::write(&tmp, session.to_toml())
+        .with_context(|| format!("cannot write {}", tmp.display()))?;
+    std::fs::rename(&tmp, &file).with_context(|| format!("cannot write {}", file.display()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_round_trips_and_stays_out_of_recent_files() {
+        let dir = std::env::temp_dir().join(format!("vimpdf-session-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(load_session(&dir), None);
+        let session = Session {
+            tabs: vec!["/papers/a.pdf".into(), "/papers/with \"quotes\".pdf".into()],
+            active: 1,
+        };
+        save_session(&dir, &session).unwrap();
+        assert_eq!(load_session(&dir), Some(session));
+        assert!(recent(&dir, 10).is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn pos(page: usize, offset: f32) -> Position {
         Position {

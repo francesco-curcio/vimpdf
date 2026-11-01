@@ -47,6 +47,9 @@ fn cache_budget(plan: &[RenderJob]) -> usize {
 
 pub struct DocView {
     pub path: PathBuf,
+    /// The file pages are rendered from: `path`, or the working copy that
+    /// holds unsaved annotations.
+    pub render_source: PathBuf,
     pub layout: Layout,
     renderer: Renderer,
     textures: LruCache<RenderJob, TextureHandle>,
@@ -100,6 +103,7 @@ impl DocView {
             outline: Vec::new(),
             metadata: info.metadata.clone(),
             fingerprint: info.fingerprint.clone(),
+            render_source: path.clone(),
             path,
             renderer,
             textures: LruCache::new(MIN_CACHE),
@@ -126,6 +130,7 @@ impl DocView {
     /// Render from `path` (a working copy with edits) and re-render `pages`.
     /// Their old tiles stay on screen until the new ones arrive.
     pub fn content_changed(&mut self, path: PathBuf, pages: &[usize]) {
+        self.render_source = path.clone();
         self.renderer.set_source(path);
         for &p in pages {
             if let Some(g) = self.generations.get_mut(p) {

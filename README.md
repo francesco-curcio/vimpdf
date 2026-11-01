@@ -157,6 +157,7 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `<C-a>` | Annotations panel (all highlights, comments and redaction marks) |
 | `u` | Undo the last annotation change |
 | `X` | Mark an area for redaction (see Redaction) |
+| `Y` | Copy an area as an image: draw a box (keys or mouse, like `X`), Enter copies it to the clipboard at 300 dpi, annotations included, in the original colours |
 | `C` | Add a sticky note (see Highlights, comments, notes and text) |
 | `T` | Add a text box, written on the page |
 | `D` | Delete an annotation: a label appears on each one on screen; type it |
@@ -196,7 +197,9 @@ two idle seconds (`mouse.hide_after`) and comes back when the mouse moves.
 | Toolbar buttons | Zoom (the field shows the zoom %; type one and Enter), fit, go to page, help | `+` `-` `:zoom <n>` `s` `a` `:<n>` `?` |
 
 Internal links jump to the exact destination (a citation lands on the
-reference, with a little context above it). External links open in the
+reference, with a little context above it). Resting the pointer on one shows
+where it leads in a popup, without jumping: the reference entry, the figure,
+the equation (`mouse.link_preview = false` turns this off). External links open in the
 default browser — only `http(s)` and `mailto` links, so a PDF can't use a link
 to launch local files or applications.
 
@@ -207,6 +210,10 @@ Each document opens in a tab; the tab bar at the top shows them numbered
 (`Alt+n` on Linux) or a click; close with `q` / `:q`, the `×`, or a middle
 click. Each tab keeps its own position, selection, search, jumps and
 annotations. Opening a file that is already open switches to its tab.
+
+The tabs open when vimpdf quits reopen at the next launch, each where you
+left it (a file you open vimpdf with gets a tab too, and is shown).
+`ui.restore_tabs = false` starts with just that file.
 
 A tab can move to a window of its own: `:detach`, or right-click the tab →
 Move to new window (also in the File menu). The new window opens at the same
