@@ -32,6 +32,16 @@ impl Color {
         let a = if hex.len() == 8 { byte(6)? } else { 255 };
         Ok(Color([byte(0)?, byte(2)?, byte(4)?, a]))
     }
+
+    /// "#rrggbb", or "#rrggbbaa" when not opaque.
+    pub fn to_hex(self) -> String {
+        let [r, g, b, a] = self.0;
+        if a == 255 {
+            format!("#{r:02x}{g:02x}{b:02x}")
+        } else {
+            format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +84,8 @@ pub struct Config {
     pub menubar: bool,
     /// Show the tab bar.
     pub tabbar: bool,
+    /// Show the scrollbar beside the pages.
+    pub scrollbar: bool,
     /// Files opened while vimpdf runs become tabs of the running window.
     pub single_instance: bool,
     pub colors: Colors,
@@ -119,6 +131,7 @@ impl Default for Config {
             auto_reload: true,
             menubar: true,
             tabbar: true,
+            scrollbar: true,
             single_instance: true,
             colors: Colors {
                 page_background: c("#ffffff"),
@@ -176,6 +189,7 @@ pub const OPTIONS: &[&str] = &[
     "ui.auto_reload",
     "ui.menubar",
     "ui.tabbar",
+    "ui.scrollbar",
     "ui.single_instance",
     "colors.page_background",
     "colors.recolor_dark",
@@ -201,6 +215,79 @@ pub const OPTIONS: &[&str] = &[
     "text.size",
     "text.color",
 ];
+
+/// Write option values (full key, value) into the config file at `path`,
+/// creating it if needed. Everything else in the file stays as it was,
+/// comments included; a changed option keeps its trailing comment.
+pub fn save_options(path: &Path, values: &[(&str, Value)]) -> Result<(), String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| {
+        let msg = e.to_string();
+        let first = msg.lines().next().unwrap_or("syntax error").to_owned();
+        format!("{} can't be updated: {first}", path.display())
+    })?;
+    for (key, value) in values {
+        let Some((section, name)) = key.split_once('.') else {
+            return Err(format!("not an option: {key}"));
+        };
+        let table = doc
+            .entry(section)
+            .or_insert_with(toml_edit::table)
+            .as_table_like_mut()
+            .ok_or_else(|| format!("'{section}' in the config file is not a [section]"))?;
+        let new = edit_value(value);
+        match table.get_mut(name).and_then(|i| i.as_value_mut()) {
+            Some(old) => {
+                let decor = old.decor().clone();
+                *old = new;
+                *old.decor_mut() = decor;
+            }
+            None => {
+                table.insert(name, toml_edit::Item::Value(new));
+            }
+        }
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    // Write next to it and rename, so a failed write never truncates it.
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, doc.to_string())
+        .and_then(|()| std::fs::rename(&tmp, path))
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+fn edit_value(v: &Value) -> toml_edit::Value {
+    match v {
+        Value::Boolean(b) => (*b).into(),
+        Value::Integer(i) => (*i).into(),
+        Value::Float(f) => (*f).into(),
+        Value::Table(t) => {
+            let mut inline = toml_edit::InlineTable::new();
+            for (k, v) in t {
+                inline.insert(k, edit_value(v));
+            }
+            inline.fmt();
+            inline.into()
+        }
+        other => other.as_str().unwrap_or_default().into(),
+    }
+}
+
+/// A number as written in the config: whole numbers without ".0" (a
+/// float rounded to 4 decimals otherwise, so 1.1f32 is written 1.1).
+fn num(v: f32) -> Value {
+    if v.fract() == 0.0 && v.abs() < 1e9 {
+        Value::Integer(v as i64)
+    } else {
+        Value::Float((f64::from(v) * 10_000.0).round() / 10_000.0)
+    }
+}
 
 fn as_bool(v: &Value) -> Result<bool, String> {
     v.as_bool()
@@ -352,6 +439,7 @@ impl Config {
             "ui.auto_reload" => self.auto_reload = as_bool(v)?,
             "ui.menubar" => self.menubar = as_bool(v)?,
             "ui.tabbar" => self.tabbar = as_bool(v)?,
+            "ui.scrollbar" => self.scrollbar = as_bool(v)?,
             "ui.single_instance" => self.single_instance = as_bool(v)?,
             "colors.page_background" => self.colors.page_background = as_color(v)?,
             "colors.recolor_dark" => self.colors.recolor_dark = as_color(v)?,
@@ -431,6 +519,71 @@ impl Config {
         Ok(())
     }
 
+    /// The value of one option, by its full key, as it would be written in
+    /// the config file. `None` for an unknown key.
+    pub fn get(&self, key: &str) -> Option<Value> {
+        let b = |v: bool| Value::Boolean(v);
+        let s = |v: &str| Value::String(v.to_owned());
+        let c = |v: Color| Value::String(v.to_hex());
+        let m = |v: Modifier| {
+            s(match v {
+                Modifier::Cmd => "cmd",
+                Modifier::Ctrl => "ctrl",
+                Modifier::Alt => "alt",
+                Modifier::Shift => "shift",
+            })
+        };
+        Some(match key {
+            "ui.font_family" => s(&self.font_family),
+            "ui.font_size" => num(self.font_size),
+            "ui.statusbar" => b(self.statusbar),
+            "ui.toolbar" => b(self.toolbar),
+            "ui.start_maximised" => b(self.start_maximised),
+            "ui.recolor" => b(self.recolor),
+            "ui.auto_reload" => b(self.auto_reload),
+            "ui.menubar" => b(self.menubar),
+            "ui.tabbar" => b(self.tabbar),
+            "ui.scrollbar" => b(self.scrollbar),
+            "ui.single_instance" => b(self.single_instance),
+            "colors.page_background" => c(self.colors.page_background),
+            "colors.recolor_dark" => c(self.colors.recolor_dark),
+            "colors.recolor_light" => c(self.colors.recolor_light),
+            "colors.search_highlight" => c(self.colors.search_highlight),
+            "colors.selection" => c(self.colors.selection),
+            "colors.caret" => c(self.colors.caret),
+            "colors.hint_background" => c(self.colors.hint_background),
+            "scroll.step" => num(self.scroll_step),
+            "scroll.smooth" => b(self.smooth_scroll),
+            "zoom.step" => num(self.zoom_step),
+            "zoom.default_fit" => s(match self.default_fit {
+                FitMode::Width => "width",
+                FitMode::Page => "page",
+                FitMode::None => "none",
+            }),
+            "mouse.drag" => s(match self.drag {
+                DragMode::Select => "select",
+                DragMode::Pan => "pan",
+            }),
+            "mouse.pan_modifier" => m(self.pan_modifier),
+            "mouse.zoom_modifier" => m(self.zoom_modifier),
+            "mouse.copy_on_select" => b(self.copy_on_select),
+            "mouse.hide_after" => num(self.hide_pointer_after),
+            "outline.pinned" => b(self.outline_pinned),
+            "outline.width" => num(self.outline_width),
+            "highlight.colors" => Value::Table(
+                self.highlight_colors
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), c(*v)))
+                    .collect(),
+            ),
+            "highlight.default" => s(&self.highlight_default.to_string()),
+            "highlight.author" => s(&self.author),
+            "text.size" => num(self.text_size),
+            "text.color" => c(self.text_color),
+            _ => return None,
+        })
+    }
+
     /// `:set option value`. The option may be the full key ("zoom.step") or
     /// just its name when unambiguous ("toolbar"). The value is read as TOML
     /// (`1.2`, `true`, `"#ff0000"`), falling back to a plain string. Returns
@@ -499,6 +652,73 @@ fn resolve_option(option: &str) -> Result<&'static str, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_option_reads_back_what_it_was_set_to() {
+        let mut c = Config::default();
+        for key in OPTIONS {
+            let v = c.get(key).unwrap_or_else(|| panic!("{key} has no getter"));
+            let before = c.clone();
+            assert_eq!(c.set(key, &v), Ok(()), "{key} = {v}");
+            assert_eq!(c, before, "{key} changed when set to its own value");
+        }
+        assert_eq!(c.get("nope.nothing"), None);
+        assert_eq!(c.get("zoom.step"), Some(Value::Float(1.1)));
+        assert_eq!(c.get("ui.font_size"), Some(Value::Integer(14)));
+        assert_eq!(
+            c.get("colors.selection"),
+            Some(Value::String("#89b4fa60".into()))
+        );
+    }
+
+    #[test]
+    fn saving_options_keeps_the_rest_of_the_file() {
+        let dir = std::env::temp_dir().join(format!("vimpdf-save-{}", std::process::id()));
+        let path = dir.join("config.toml");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // No file yet: created with just these.
+        save_options(&path, &[("ui.toolbar", Value::Boolean(true))]).unwrap();
+        assert!(Config::load(&path).0.toolbar);
+
+        std::fs::write(
+            &path,
+            "# my config\n[ui]\nfont_size = 14   # bigger later\nmenubar = false\n\n\
+             [keys.normal]\n\"x\" = \"quit\"\n",
+        )
+        .unwrap();
+        let colours: Table = [("y".to_owned(), Value::String("#ffff00".into()))]
+            .into_iter()
+            .collect();
+        save_options(
+            &path,
+            &[
+                ("ui.font_size", Value::Integer(16)),
+                ("zoom.step", Value::Float(1.25)),
+                ("highlight.colors", Value::Table(colours)),
+            ],
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# my config\n[ui]\n"), "{text}");
+        assert!(text.contains("font_size = 16   # bigger later"), "{text}");
+        assert!(text.contains("menubar = false"), "{text}");
+        assert!(text.contains("\"x\" = \"quit\""), "{text}");
+        let (c, warnings) = Config::load(&path);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!((c.font_size, c.zoom_step), (16.0, 1.25));
+        assert_eq!(c.highlight_colors.len(), 1);
+        assert!(!c.menubar);
+
+        std::fs::write(&path, "[ui\n").unwrap();
+        assert!(save_options(&path, &[("ui.toolbar", Value::Boolean(true))]).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[ui\n",
+            "left alone"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn parses_colours() {

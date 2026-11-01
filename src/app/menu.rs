@@ -157,6 +157,7 @@ impl VimpdfApp {
                 self.item("Find pre&vious", Command::SearchPrev(1), "N")
                     .enabled(searched),
                 Item::Separator,
+                self.item("S&ettings…", Command::OpenSettings, ":settings"),
                 self.item("Edit c&onfig file", Command::EditConfig, ":config"),
                 self.item("Reloa&d config", Command::Source, ":source"),
             ],
@@ -199,6 +200,11 @@ impl VimpdfApp {
                 Item::Separator,
                 self.toggle_item("&Menu bar", Command::ToggleMenubar, self.config.menubar),
                 self.toggle_item("Tool&bar", Command::ToggleToolbar, self.config.toolbar),
+                self.toggle_item(
+                    "Scro&llbar",
+                    Command::ToggleScrollbar,
+                    self.config.scrollbar,
+                ),
                 self.toggle_item(
                     "&Status bar",
                     Command::ToggleStatusbar,

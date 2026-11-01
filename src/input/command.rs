@@ -153,9 +153,12 @@ pub enum Command {
     /// Open the File menu (works with the menu bar hidden too).
     OpenMenu,
     ToggleMenubar,
+    ToggleScrollbar,
     /// Open the config file in the system's text editor (creating it from
     /// the example if missing).
     EditConfig,
+    /// The Settings window.
+    OpenSettings,
     /// Document properties window.
     ToggleProperties,
     /// Open the `:` command line, optionally prefilled.
@@ -256,7 +259,9 @@ const SIMPLE: &[(&str, Command)] = &[
     ("write", Command::Write(None)),
     ("menu", Command::OpenMenu),
     ("toggle_menubar", Command::ToggleMenubar),
+    ("toggle_scrollbar", Command::ToggleScrollbar),
     ("edit_config", Command::EditConfig),
+    ("settings", Command::OpenSettings),
     ("properties", Command::ToggleProperties),
     ("redact", Command::RedactSelection),
     ("redact_area", Command::RedactArea),
@@ -455,6 +460,7 @@ pub const EX_COMMANDS: &[&str] = &[
     "redact-matches",
     "saveas",
     "set",
+    "settings",
     "source",
     "tabclose",
     "tabedit",
@@ -534,6 +540,7 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
         },
         "properties" | "info" => Command::ToggleProperties,
         "config" => Command::EditConfig,
+        "settings" | "preferences" | "prefs" => Command::OpenSettings,
         "o" | "open" | "e" | "edit" if rest.is_empty() => {
             return Err(format!(":{word} needs a file path"));
         }

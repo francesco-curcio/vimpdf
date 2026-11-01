@@ -8,6 +8,8 @@ pub mod fonts;
 pub mod help;
 pub mod menubar;
 pub mod outline;
+pub mod scrollbar;
+pub mod settings;
 pub mod statusbar;
 pub mod tabbar;
 pub mod toolbar;

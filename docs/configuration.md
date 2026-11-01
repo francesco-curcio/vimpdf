@@ -9,6 +9,10 @@ if `XDG_CONFIG_HOME` is set; the same path on macOS, rather than
   default. A TOML syntax error ignores the whole file. The viewer always starts.
 - `:source` reloads the file, including key bindings, without restarting.
 - `:set <option> <value>` changes an option for the current session only.
+- `:settings` (Edit → Settings…) shows every option below with a control.
+  Changes apply as you make them; Save writes the options you changed into
+  the config file, leaving the rest of it (comments included) as it is.
+  Cancel or `Esc` undoes them. Key bindings are edited in the file.
 
 ## Options
 
@@ -25,6 +29,7 @@ unambiguous (`toolbar`). Booleans also accept `:set toolbar` / `:set notoolbar`.
 | `toolbar` | `false` | Show the toolbar (`<C-t>` toggles it). |
 | `menubar` | `true` | Show the File / Edit / View menu bar (`gm` opens it even when hidden). |
 | `tabbar` | `true` | Show the tab bar. Tabs work the same without it (`gt`, `gT`, `{n}gt`). |
+| `scrollbar` | `true` | Show the scrollbar on the right of the pages. Drag it (the page number shows beside it) or press the track to jump there. Also in View → Scrollbar. |
 | `single_instance` | `true` | Open files in a new tab of the running vimpdf. `false`: each file gets its own window (as with `--new-window`); `:attach` still moves a tab to the first window. Read when vimpdf is launched. (Unix only.) |
 | `start_maximised` | `true` | Open the window filling the screen's usable area. |
 | `recolor` | `false` | Start in recolor (dark) mode; `<C-r>` toggles. |
@@ -174,11 +179,13 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `menu` | `gm`, `<F10>` (normal and visual mode) |
 | `toggle_menubar` | — (`:set menubar`) |
 | `edit_config` | — (`:config`) |
+| `settings` | — (`:settings`) |
 | `properties` | — (`:info`) |
 | `next_tab` | `gt`, `<C-PageDown>`, `<C-Tab>` (with a count: that tab) |
 | `prev_tab` | `gT`, `<C-PageUp>`, `<C-S-Tab>` |
 | `goto_tab <n>` | `<D-1>`…`<D-9>` on macOS, `<A-1>`…`<A-9>` elsewhere |
 | `new_tab` | — (`:tabnew`) |
+| `toggle_scrollbar` | — (`:set scrollbar`, View → Scrollbar) |
 | `detach_tab` | — (`:detach`: move the tab to a new window) |
 | `attach_tab` | — (`:attach`: move the tab to the main window) |
 | `quit_all` | — (`:qa`) |

@@ -3759,6 +3759,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
@@ -4004,6 +4005,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "toml",
+ "toml_edit",
  "tracing",
  "tracing-subscriber",
  "winit",

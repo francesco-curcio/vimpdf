@@ -46,6 +46,7 @@ const EX_COMMANDS: &[(&str, &str)] = &[
         ":set <option> <value>",
         "change an option (e.g. :set toolbar)",
     ),
+    (":settings", "settings window (save writes the config file)"),
     (":source", "reload the config file"),
     (":help", "this overlay"),
 ];

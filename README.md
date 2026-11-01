@@ -192,6 +192,7 @@ two idle seconds (`mouse.hide_after`) and comes back when the mouse moves.
 | Click the page number in the status bar | Go to page | `:<n>` |
 | Click an outline entry | Jump to it (panel stays open) | `<Tab>`, `j`/`k`, Enter |
 | Drag the outline's right edge | Resize it | `<` `>` in the outline |
+| Scrollbar (right edge) | Drag to scroll (shows the page number); press the track to jump there. `ui.scrollbar = false` hides it | `<C-d>` `<C-u>` `gg` `G` |
 | Toolbar buttons | Zoom (the field shows the zoom %; type one and Enter), fit, go to page, help | `+` `-` `:zoom <n>` `s` `a` `:<n>` `?` |
 
 Internal links jump to the exact destination (a citation lands on the
@@ -288,6 +289,7 @@ steps through them, `Shift+Tab` backwards.
 | `:e!` | Reload the file, discarding unsaved annotations |
 | `:annotations` | Annotations panel |
 | `:info` | Document properties |
+| `:settings` | Settings window (Edit → Settings…): every option with a control, applied as you change it; Save writes the ones you changed into the config file (comments kept), Cancel or `Esc` undoes them |
 | `:config` | Open the config file in your text editor |
 | `:redact-matches` | Mark every match of the current search for redaction |
 | `:redact [path]` | Apply all redaction marks, writing `<name>-redacted.pdf` (or `path`) |

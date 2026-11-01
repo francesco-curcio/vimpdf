@@ -93,6 +93,7 @@ pub struct VimpdfApp {
     /// Mode to return to when a menu closes.
     menu_return: Mode,
     show_props: bool,
+    settings: Option<ui::settings::SettingsWindow>,
     /// When the mouse last moved, to hide an idle pointer.
     pointer_active: Instant,
     /// The outline layout as last written to `ui.toml`.
@@ -161,6 +162,7 @@ impl VimpdfApp {
                 outline_width: 0.0,
             },
             show_props: false,
+            settings: None,
         };
         app.install_font(ctx, &mut warnings);
         app.restore_ui_state();
@@ -295,6 +297,42 @@ impl VimpdfApp {
         }
     }
 
+    /// The Settings window, while open. Changes apply as they are made.
+    fn show_settings(&mut self, ctx: &egui::Context) -> Option<Command> {
+        use ui::settings::Outcome;
+        let window = self.settings.as_mut()?;
+        let outcome = window.show(ctx, &mut self.config);
+        let mut warnings = Vec::new();
+        self.install_font(ctx, &mut warnings);
+        self.report_warnings(warnings);
+        let mut command = None;
+        match outcome? {
+            Outcome::Save(values) => {
+                let Some(path) = self.config_path.clone() else {
+                    self.error("no config file location (HOME not set?)");
+                    return None;
+                };
+                match crate::config::save_options(&path, &values) {
+                    Ok(()) => self.info(format!("Settings saved to {}", path.display())),
+                    Err(e) => {
+                        // Keep the window open, with the changes, to retry.
+                        self.error(e);
+                        return None;
+                    }
+                }
+            }
+            Outcome::Cancel(before) => {
+                self.config = *before;
+                let mut warnings = Vec::new();
+                self.install_font(ctx, &mut warnings);
+                self.report_warnings(warnings);
+            }
+            Outcome::EditFile => command = Some(Command::EditConfig),
+        }
+        self.settings = None;
+        command
+    }
+
     fn source_config(&mut self, ctx: &egui::Context) {
         let Some(path) = self.config_path.clone() else {
             return self.error("no config file location (HOME not set?)");
@@ -323,6 +361,23 @@ impl VimpdfApp {
         } else if let Some(vp) = self.viewport.as_mut() {
             vp.scroll_by(dx, dy);
         }
+    }
+
+    /// While the scrollbar is dragged: the page number beside the thumb.
+    fn draw_scrollbar_page(&self, painter: &egui::Painter, thumb: Rect, vp: &Viewport) {
+        let page = vp.current_page(&self.view.layout) + 1;
+        let galley = painter.layout_no_wrap(
+            format!("{page} / {}", self.view.page_count()),
+            egui::FontId::monospace(self.config.font_size),
+            ui::BAR_TEXT,
+        );
+        let size = galley.size() + Vec2::new(16.0, 8.0);
+        let rect = Rect::from_min_size(
+            egui::pos2(thumb.min.x - size.x - 6.0, thumb.center().y - size.y / 2.0),
+            size,
+        );
+        painter.rect_filled(rect, 4.0, ui::BAR_BACKGROUND);
+        painter.galley(rect.min + Vec2::new(8.0, 4.0), galley, ui::BAR_TEXT);
     }
 
     fn apply_smooth_scroll(&mut self, ctx: &egui::Context) {
@@ -555,7 +610,13 @@ impl VimpdfApp {
             Command::ApplyRedactions(path) => self.apply_redactions(path),
             Command::OpenMenu => self.open_menu(),
             Command::ToggleMenubar => self.config.menubar = !self.config.menubar,
+            Command::ToggleScrollbar => self.config.scrollbar = !self.config.scrollbar,
             Command::EditConfig => self.edit_config(),
+            Command::OpenSettings => {
+                if self.settings.is_none() {
+                    self.settings = Some(ui::settings::SettingsWindow::new(&self.config));
+                }
+            }
             Command::ToggleProperties => self.show_props = !self.show_props,
             Command::Set { option, value } => match self.config.set_from_str(&option, &value) {
                 Ok(key) => {
@@ -687,6 +748,10 @@ impl VimpdfApp {
             if !toks.is_empty() {
                 tracing::trace!(?toks, mode = ?self.mode, "keys");
             }
+        }
+        // The Settings window takes the keyboard (its own Esc closes it).
+        if self.settings.is_some() {
+            return Vec::new();
         }
         // A focused text field (command line, toolbar page box) gets the keys.
         if self.mode == Mode::Hints {
@@ -871,6 +936,14 @@ impl eframe::App for VimpdfApp {
                 }
                 r
             });
+        // The scrollbar takes a strip on the right; the pages fit beside it.
+        let scrollbar_rect = (self.config.scrollbar && !on_start).then(|| {
+            area.max.x -= ui::scrollbar::WIDTH;
+            Rect::from_min_max(
+                egui::pos2(area.max.x, area.min.y),
+                egui::pos2(area.max.x + ui::scrollbar::WIDTH, area.max.y),
+            )
+        });
 
         if self.viewport.is_none() {
             self.viewport = Some(self.new_viewport(area));
@@ -939,6 +1012,16 @@ impl eframe::App for VimpdfApp {
             ctx.request_repaint();
             return;
         };
+        let mut scrollbar_drag = None;
+        if let Some(rect) = scrollbar_rect {
+            let total = self.view.layout.height();
+            let s = ui::scrollbar::show(ui, rect, vp.y, vp.doc_height(), total);
+            if let Some(y) = s.y {
+                vp.y = y;
+                self.pending_scroll.y = 0.0;
+            }
+            scrollbar_drag = s.dragging.then_some(s.thumb);
+        }
         vp.clamp(&self.view.layout);
         if vp.y != y_before {
             self.scrolling_up = vp.y < y_before;
@@ -977,6 +1060,9 @@ impl eframe::App for VimpdfApp {
         self.draw_placing(&painter, area, &vp);
         self.draw_selection(&painter, area, &vp);
         self.draw_hints(&painter, area, &vp);
+        if let Some(thumb) = scrollbar_drag {
+            self.draw_scrollbar_page(&painter, thumb, &vp);
+        }
         let mut start_command = None;
         if self.start.is_some() {
             start_command = self.show_start_screen(ui, area);
@@ -1112,6 +1198,9 @@ impl eframe::App for VimpdfApp {
         }
         if self.show_props {
             self.show_properties(&ctx);
+        }
+        if let Some(cmd) = self.show_settings(&ctx) {
+            ui_commands.push(cmd);
         }
         if let Some(rect) = menubar_rect
             && let Some(cmd) = self.show_menubar(&ctx, ui, rect)
