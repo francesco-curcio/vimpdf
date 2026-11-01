@@ -1,6 +1,7 @@
 use eframe::egui::{self, Align2, FontId, Grid, RichText, ScrollArea, Vec2};
 
 use super::{ACCENT, BAR_DIM};
+use crate::input::command::Command;
 use crate::input::keymap::Keymap;
 
 const MOUSE: &[(&str, &str)] = &[
@@ -79,8 +80,33 @@ impl HelpScroll {
         self.requested
     }
 
-    pub fn view_height(&self) -> f32 {
-        self.view_height
+    pub fn take_requested(&mut self) -> Option<f32> {
+        self.requested.take()
+    }
+
+    /// Remember where a scroll area ended up this frame.
+    pub fn record<R>(&mut self, out: &egui::scroll_area::ScrollAreaOutput<R>) {
+        self.offset = out.state.clamped_offset().y;
+        self.view_height = out.inner_rect.height();
+        self.max = (out.content_size.y - out.inner_rect.height()).max(0.0);
+    }
+
+    /// Apply a scrolling command (`j`, `<C-d>`, `gg`…) with `step` points
+    /// per line. False if `cmd` doesn't scroll.
+    pub fn key(&mut self, cmd: &Command, step: f32) -> bool {
+        let screen = self.view_height.max(step);
+        match cmd {
+            Command::ScrollDown(n) => self.by(*n as f32 * step),
+            Command::ScrollUp(n) => self.by(-(*n as f32) * step),
+            Command::HalfPageDown(n) => self.by(*n as f32 * screen / 2.0),
+            Command::HalfPageUp(n) => self.by(-(*n as f32) * screen / 2.0),
+            Command::ScreenDown(n) | Command::NextPage(n) => self.by(*n as f32 * screen),
+            Command::ScreenUp(n) | Command::PrevPage(n) => self.by(-(*n as f32) * screen),
+            Command::GotoFirst => self.scroll_top(),
+            Command::GotoLast => self.scroll_bottom(),
+            _ => return false,
+        }
+        true
     }
 }
 
@@ -103,7 +129,7 @@ pub fn show(
         .max_size(max)
         .show(ctx, |ui| {
             let mut area = ScrollArea::vertical();
-            if let Some(offset) = scroll.requested.take() {
+            if let Some(offset) = scroll.take_requested() {
                 area = area.vertical_scroll_offset(offset);
             }
             let out = area.show(ui, |ui| {
@@ -141,9 +167,7 @@ pub fn show(
                     .color(BAR_DIM),
                 );
             });
-            scroll.offset = out.state.clamped_offset().y;
-            scroll.view_height = out.inner_rect.height();
-            scroll.max = (out.content_size.y - out.inner_rect.height()).max(0.0);
+            scroll.record(&out);
         });
 }
 

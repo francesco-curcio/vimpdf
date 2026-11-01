@@ -1,9 +1,8 @@
 //! The Settings window: every option of the config file, with a control
-//! each. Changes apply at once (like `:set`); Save writes the options
-//! changed here into the config file, Cancel puts everything back. Key
-//! bindings stay in the file.
-
-use std::collections::BTreeSet;
+//! each. Changes apply at once (like `:set`); Save writes into the config
+//! file every option whose value, as shown, differs from the file's (so
+//! also what `<C-r>`, `<C-t>` or `:set` changed before), Cancel puts
+//! everything back. Key bindings stay in the file.
 
 use eframe::egui::{self, Align2, Grid, RichText, ScrollArea, Vec2};
 use toml::Value;
@@ -98,7 +97,7 @@ const SECTIONS: &[(&str, &[Setting])] = &[
                 "ui.recolor",
                 "Start in dark mode",
                 Kind::Bool,
-                "<C-r> toggles dark mode.",
+                "Ticked while dark mode is on (<C-r> toggles it); Save makes vimpdf start that way.",
             ),
             s(
                 "ui.recolor_keep_hue",
@@ -267,19 +266,31 @@ pub enum Outcome {
 pub struct SettingsWindow {
     /// The config when the window opened, for Cancel.
     before: Config,
-    /// Options changed here, to save.
-    touched: BTreeSet<&'static str>,
+    /// What the config file says (defaults for what it leaves out).
+    file: Config,
     /// Text fields being edited, applied when they lose focus.
     texts: std::collections::HashMap<&'static str, String>,
+    /// Scrolled by the keyboard like the help overlay.
+    pub scroll: super::help::HelpScroll,
 }
 
 impl SettingsWindow {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &Config, file: Config) -> Self {
         Self {
             before: config.clone(),
-            touched: BTreeSet::new(),
+            file,
             texts: Default::default(),
+            scroll: Default::default(),
         }
+    }
+
+    /// Options whose value in `config` isn't what the file gives.
+    fn unsaved(&self, config: &Config) -> Vec<(&'static str, Value)> {
+        crate::config::OPTIONS
+            .iter()
+            .filter_map(|k| config.get(k).map(|v| (*k, v)))
+            .filter(|(k, v)| self.file.get(k).as_ref() != Some(v))
+            .collect()
     }
 
     /// Draw the window, changing `config` as controls change. Its own text
@@ -301,7 +312,11 @@ impl SettingsWindow {
             .show(ctx, |ui| {
                 ui.style_mut().override_font_id =
                     Some(egui::FontId::proportional(font_size.min(18.0)));
-                ScrollArea::vertical().max_height(height - 4.0 * font_size).show(ui, |ui| {
+                let mut area = ScrollArea::vertical().max_height(height - 4.0 * font_size);
+                if let Some(offset) = self.scroll.take_requested() {
+                    area = area.vertical_scroll_offset(offset);
+                }
+                let out = area.show(ui, |ui| {
                     for (title, settings) in SECTIONS {
                         ui.add_space(6.0);
                         ui.label(RichText::new(*title).strong());
@@ -317,20 +332,15 @@ impl SettingsWindow {
                             });
                     }
                 });
+                self.scroll.record(&out);
                 ui.separator();
                 ui.horizontal(|ui| {
-                    let label = if self.touched.is_empty() {
-                        "Save"
-                    } else {
-                        "Save to config file"
-                    };
-                    if ui.add_enabled(!self.touched.is_empty(), egui::Button::new(label)).clicked() {
-                        outcome = Some(Outcome::Save(
-                            self.touched
-                                .iter()
-                                .filter_map(|k| config.get(k).map(|v| (*k, v)))
-                                .collect(),
-                        ));
+                    let unsaved = self.unsaved(config);
+                    let save = ui
+                        .add_enabled(!unsaved.is_empty(), egui::Button::new("Save to config file"))
+                        .on_disabled_hover_text("The config file already says all this");
+                    if save.clicked() {
+                        outcome = Some(Outcome::Save(unsaved));
                     }
                     if ui.button("Cancel").clicked() {
                         outcome = Some(Outcome::Cancel(Box::new(self.before.clone())));
@@ -344,7 +354,10 @@ impl SettingsWindow {
                     }
                 });
                 ui.label(
-                    RichText::new("Changes apply now; Save keeps them for next time.")
+                    RichText::new(
+                        "Changes apply now; Save keeps them for next time. \
+                         j k, <C-d> <C-u>, gg G scroll.",
+                    )
                         .color(BAR_DIM)
                         .small(),
                 );
@@ -374,11 +387,8 @@ impl SettingsWindow {
             return;
         };
         let new = control(ui, setting, &value, config, &mut self.texts);
-        let changed = new
-            .filter(|v| *v != value)
-            .is_some_and(|v| config.set(key, &v).is_ok());
-        if changed {
-            self.touched.insert(key);
+        if let Some(v) = new.filter(|v| *v != value) {
+            let _ = config.set(key, &v);
         }
         let default = defaults.get(key);
         let is_default = config.get(key) == default;
@@ -388,7 +398,6 @@ impl SettingsWindow {
             && config.set(key, &d).is_ok()
         {
             self.texts.remove(key);
-            self.touched.insert(key);
         }
     }
 }
@@ -448,16 +457,23 @@ fn control(
         Kind::HighlightColors => {
             let table = value.as_table()?;
             let mut changed = None;
-            ui.horizontal_wrapped(|ui| {
-                for (letter, c) in table {
-                    ui.label(RichText::new(letter).monospace());
-                    if let Some(new) = color(ui, c.as_str().unwrap_or_default()) {
-                        let mut t = table.clone();
-                        t.insert(letter.clone(), Value::String(new));
-                        changed = Some(Value::Table(t));
+            // A grid, three per line: wrapped widgets in a grid cell would
+            // spill over the rows below (the row keeps one line's height).
+            Grid::new("vimpdf-highlight-colours")
+                .spacing([6.0, 4.0])
+                .show(ui, |ui| {
+                    for (i, (letter, c)) in table.iter().enumerate() {
+                        ui.label(RichText::new(letter).monospace());
+                        if let Some(new) = color(ui, c.as_str().unwrap_or_default()) {
+                            let mut t = table.clone();
+                            t.insert(letter.clone(), Value::String(new));
+                            changed = Some(Value::Table(t));
+                        }
+                        if i % 3 == 2 {
+                            ui.end_row();
+                        }
                     }
-                }
-            });
+                });
             changed
         }
         Kind::HighlightLetter => {
@@ -540,7 +556,7 @@ mod tests {
     fn shows_every_option_and_escape_puts_the_config_back() {
         let ctx = egui::Context::default();
         let mut config = Config::default();
-        let mut w = SettingsWindow::new(&config);
+        let mut w = SettingsWindow::new(&config, Config::default());
         assert!(frame(&ctx, &mut w, &mut config, false).is_none());
         // A change made while it's open (as a control would).
         config.toolbar = true;
@@ -549,6 +565,31 @@ mod tests {
             Some(Outcome::Cancel(before)) => assert_eq!(*before, Config::default()),
             _ => panic!("expected Cancel"),
         }
+    }
+
+    #[test]
+    fn saves_what_differs_from_the_file_however_it_was_changed() {
+        let file = Config {
+            zoom_step: 1.5,
+            ..Config::default()
+        };
+        // Dark mode switched on with <C-r> before opening the window.
+        let mut config = file.clone();
+        config.recolor = true;
+        let w = SettingsWindow::new(&config, file);
+        assert_eq!(
+            w.unsaved(&config),
+            vec![("ui.recolor", Value::Boolean(true))]
+        );
+        config.zoom_step = 1.1;
+        assert_eq!(
+            w.unsaved(&config).len(),
+            2,
+            "back to the default, unlike the file"
+        );
+        config.recolor = false;
+        config.zoom_step = 1.5;
+        assert!(w.unsaved(&config).is_empty());
     }
 
     #[test]

@@ -614,7 +614,11 @@ impl VimpdfApp {
             Command::EditConfig => self.edit_config(),
             Command::OpenSettings => {
                 if self.settings.is_none() {
-                    self.settings = Some(ui::settings::SettingsWindow::new(&self.config));
+                    let file = self
+                        .config_path
+                        .as_deref()
+                        .map_or_else(Config::default, |p| Config::load(p).0);
+                    self.settings = Some(ui::settings::SettingsWindow::new(&self.config, file));
                 }
             }
             Command::ToggleProperties => self.show_props = !self.show_props,
@@ -711,24 +715,12 @@ impl VimpdfApp {
     /// A command while the help overlay is open: scrolling commands scroll
     /// it, closing ones close it, everything else is ignored.
     fn help_key(&mut self, cmd: Command) {
-        let step = self.config.scroll_step;
-        let screen = self.help_scroll.view_height().max(step);
-        let scroll = &mut self.help_scroll;
-        match &cmd {
-            Command::ScrollDown(n) => scroll.by(*n as f32 * step),
-            Command::ScrollUp(n) => scroll.by(-(*n as f32) * step),
-            Command::HalfPageDown(n) => scroll.by(*n as f32 * screen / 2.0),
-            Command::HalfPageUp(n) => scroll.by(-(*n as f32) * screen / 2.0),
-            Command::ScreenDown(n) | Command::NextPage(n) => scroll.by(*n as f32 * screen),
-            Command::ScreenUp(n) | Command::PrevPage(n) => scroll.by(-(*n as f32) * screen),
-            Command::GotoFirst => scroll.scroll_top(),
-            Command::GotoLast => scroll.scroll_bottom(),
-            Command::ToggleHelp | Command::Cancel | Command::Quit => {
-                self.show_help = false;
-                return;
-            }
-            _ => {}
+        if matches!(cmd, Command::ToggleHelp | Command::Cancel | Command::Quit) {
+            self.show_help = false;
+            return;
         }
+        let scroll = &mut self.help_scroll;
+        scroll.key(&cmd, self.config.scroll_step);
         tracing::trace!(?cmd, offset = ?scroll.requested(), "help key");
     }
 
@@ -749,8 +741,17 @@ impl VimpdfApp {
                 tracing::trace!(?toks, mode = ?self.mode, "keys");
             }
         }
-        // The Settings window takes the keyboard (its own Esc closes it).
-        if self.settings.is_some() {
+        // The Settings window takes the keyboard: scrolling keys scroll it,
+        // its own Esc closes it, text fields get what's typed in them.
+        if let Some(settings) = self.settings.as_mut() {
+            if !ctx.text_edit_focused() && !egui::Popup::is_any_open(ctx) {
+                let events = ctx.input(|i| i.events.clone());
+                for tok in key_tokens(&events) {
+                    if let Some(cmd) = self.keys.feed(&tok, &self.keymap) {
+                        settings.scroll.key(&cmd, self.config.scroll_step);
+                    }
+                }
+            }
             return Vec::new();
         }
         // A focused text field (command line, toolbar page box) gets the keys.

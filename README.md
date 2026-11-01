@@ -289,7 +289,7 @@ steps through them, `Shift+Tab` backwards.
 | `:e!` | Reload the file, discarding unsaved annotations |
 | `:annotations` | Annotations panel |
 | `:info` | Document properties |
-| `:settings` | Settings window (Edit → Settings…): every option with a control, applied as you change it; Save writes the ones you changed into the config file (comments kept), Cancel or `Esc` undoes them |
+| `:settings` | Settings window (Edit → Settings…): every option with a control, applied as you change it; Save writes what differs from the config file into it (comments kept), Cancel or `Esc` undoes them |
 | `:config` | Open the config file in your text editor |
 | `:redact-matches` | Mark every match of the current search for redaction |
 | `:redact [path]` | Apply all redaction marks, writing `<name>-redacted.pdf` (or `path`) |

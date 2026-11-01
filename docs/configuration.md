@@ -10,8 +10,9 @@ if `XDG_CONFIG_HOME` is set; the same path on macOS, rather than
 - `:source` reloads the file, including key bindings, without restarting.
 - `:set <option> <value>` changes an option for the current session only.
 - `:settings` (Edit → Settings…) shows every option below with a control.
-  Changes apply as you make them; Save writes the options you changed into
-  the config file, leaving the rest of it (comments included) as it is.
+  Changes apply as you make them; Save writes every option whose value
+  differs from the config file's (including what `<C-r>`, `<C-t>` or `:set`
+  changed before), leaving the rest of the file (comments included) as it is.
   Cancel or `Esc` undoes them. Key bindings are edited in the file.
 
 ## Options
