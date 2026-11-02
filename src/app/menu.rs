@@ -159,6 +159,7 @@ impl VimpdfApp {
                     .enabled(searched),
                 Item::Separator,
                 self.item("S&ettings…", Command::OpenSettings, ":settings"),
+                self.item("&Key bindings…", Command::OpenKeyBindings, ":keys"),
                 self.item("Edit c&onfig file", Command::EditConfig, ":config"),
                 self.item("Reloa&d config", Command::Source, ":source"),
             ],

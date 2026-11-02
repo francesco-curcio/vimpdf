@@ -296,7 +296,8 @@ steps through them, `Shift+Tab` backwards.
 | `:e!` | Reload the file, discarding unsaved annotations |
 | `:annotations` | Annotations panel |
 | `:info` | Document properties |
-| `:settings` | Settings window (Edit → Settings…): every option with a control, applied as you change it; Save writes what differs from the config file into it (comments kept), Cancel or `Esc` undoes them |
+| `:settings` | Settings window (Edit → Settings…): every option with a control, applied as you change it; Save (`Cmd+S` / `Ctrl+S`) writes what differs from the config file into it (comments kept), Cancel or `Esc` undoes them |
+| `:keys` | The Settings window's key bindings page (Edit → Key bindings…): every command with its keys, in normal and visual mode. `j`/`k` pick a command, `a` or Enter adds a key (press it, then Enter; a clash is pointed out), `h`/`l` and `x` remove one, `r` resets the command, `v` switches mode, `/` filters. `gt` switches between the two pages |
 | `:config` | Open the config file in your text editor |
 | `:redact-matches` | Mark every match of the current search for redaction |
 | `:redact [path]` | Apply all redaction marks, writing `<name>-redacted.pdf` (or `path`) |

@@ -49,6 +49,7 @@ const EX_COMMANDS: &[(&str, &str)] = &[
         "change an option (e.g. :set toolbar)",
     ),
     (":settings", "settings window (save writes the config file)"),
+    (":keys", "key bindings: add, remove, reset"),
     (":source", "reload the config file"),
     (":help", "this overlay"),
 ];

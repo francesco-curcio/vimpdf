@@ -267,6 +267,7 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | `ui/menubar.rs`, `app/menu.rs` | Menu bar: widget + keyboard navigation, contents |
 | `welcome.rs` | The (blank) document behind the start page |
 | `app/tabs.rs`, `ui/tabbar.rs` | Tabs: parking and switching documents, the tab bar |
+| `ui/settings.rs`, `ui/keybindings.rs` | Settings window: options, and the key bindings page (saved as `[keys.*]` overrides of the defaults) |
 | `app/start.rs` | Start page: recent files |
 | `scripts/` | App bundle and icon generation (macOS), install with desktop entry (Linux) |
 | `selection.rs` | Text positions, caret motions, selections, clean copying |

@@ -103,7 +103,15 @@ fn canonical_key_name(name: &str) -> Option<String> {
         .map(|n| (*n).to_owned())
 }
 
-#[derive(Debug, Default, Clone)]
+/// A sequence in config notation, which `parse_sequence` reads back: the
+/// tokens joined, with a literal `<` written `<lt>`.
+pub fn seq_to_string(seq: &[String]) -> String {
+    seq.iter()
+        .map(|t| if t == "<" { "<lt>" } else { t.as_str() })
+        .collect()
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Keymap {
     bindings: HashMap<KeySeq, Command>,
     prefixes: HashSet<KeySeq>,
@@ -141,6 +149,68 @@ impl Keymap {
     #[cfg(test)]
     pub fn get(&self, seq: &[String]) -> Option<&Command> {
         self.bindings.get(seq)
+    }
+
+    /// The sequences bound to `cmd`, shortest and plainest first.
+    pub fn keys_for(&self, cmd: &Command) -> Vec<KeySeq> {
+        let mut seqs: Vec<KeySeq> = self
+            .bindings
+            .iter()
+            .filter(|(_, c)| *c == cmd)
+            .map(|(seq, _)| seq.clone())
+            .collect();
+        seqs.sort_by_key(|seq| {
+            let s = seq.concat();
+            (s.starts_with('<'), s.len(), s)
+        });
+        seqs
+    }
+
+    /// Every bound command, once each.
+    pub fn commands(&self) -> Vec<Command> {
+        let mut out: Vec<Command> = Vec::new();
+        for cmd in self.bindings.values() {
+            if !out.contains(cmd) {
+                out.push(cmd.clone());
+            }
+        }
+        out
+    }
+
+    /// Bindings that would get in the way of binding `seq`: the one it
+    /// replaces, the ones it would stop (a binding that starts with `seq`
+    /// never fires once `seq` is bound, and neither does one `seq` starts
+    /// with). Each with its sequence.
+    pub fn conflicts(&self, seq: &[String]) -> Vec<(KeySeq, Command)> {
+        let mut out: Vec<(KeySeq, Command)> = self
+            .bindings
+            .iter()
+            .filter(|(s, _)| {
+                let n = s.len().min(seq.len());
+                s[..n] == seq[..n]
+            })
+            .map(|(s, c)| (s.clone(), c.clone()))
+            .collect();
+        out.sort_by_key(|(s, _)| s.concat());
+        out
+    }
+
+    /// What `current` changes from `default`, as config entries
+    /// (sequence, command; an empty command unbinds), sorted.
+    pub fn overrides(default: &Keymap, current: &Keymap) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = Vec::new();
+        for (seq, cmd) in &current.bindings {
+            if default.bindings.get(seq) != Some(cmd) {
+                out.push((seq_to_string(seq), cmd.describe()));
+            }
+        }
+        for seq in default.bindings.keys() {
+            if !current.bindings.contains_key(seq) {
+                out.push((seq_to_string(seq), String::new()));
+            }
+        }
+        out.sort();
+        out
     }
 
     /// The shortest key sequence bound to `cmd`, for menus ("gg", "<C-a>").
@@ -537,6 +607,53 @@ mod tests {
             feed_all(&mut st, &km, &["2", "g", "T"]),
             vec![Command::PrevTab(2)]
         );
+    }
+
+    #[test]
+    fn default_bindings_survive_being_written() {
+        for km in [Keymap::default_normal(), Keymap::default_visual()] {
+            for (seq, cmd) in &km.bindings {
+                assert_eq!(parse_sequence(&seq_to_string(seq)).as_ref(), Ok(seq));
+                assert_eq!(Command::parse(&cmd.describe()).as_ref(), Ok(cmd), "{seq:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn overrides_record_changes_from_the_defaults() {
+        let default = Keymap::default_normal();
+        let mut km = default.clone();
+        assert!(Keymap::overrides(&default, &km).is_empty());
+        km.unbind(&parse_sequence("q").unwrap());
+        km.bind("<C-w>", Command::Quit);
+        km.bind("x", Command::ScrollDown(3));
+        km.bind("<lt>", Command::ZoomOut(1));
+        let o = Keymap::overrides(&default, &km);
+        let o: Vec<(&str, &str)> = o.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        assert_eq!(
+            o,
+            vec![
+                ("<C-w>", "quit"),
+                ("<lt>", "zoom_out"),
+                ("q", ""),
+                ("x", "scroll_down 3")
+            ]
+        );
+    }
+
+    #[test]
+    fn conflicts_include_prefixes_both_ways() {
+        let km = Keymap::default_normal();
+        let names = |seq: &str| -> Vec<String> {
+            km.conflicts(&parse_sequence(seq).unwrap())
+                .into_iter()
+                .map(|(s, _)| s.concat())
+                .collect()
+        };
+        assert_eq!(names("j"), vec!["j"]);
+        assert!(names("g").contains(&"gg".to_owned()));
+        assert_eq!(names("jx"), vec!["j"]);
+        assert!(names("<C-x>").is_empty());
     }
 
     #[cfg(target_os = "macos")]

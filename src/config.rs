@@ -231,7 +231,27 @@ pub const OPTIONS: &[&str] = &[
 /// Write option values (full key, value) into the config file at `path`,
 /// creating it if needed. Everything else in the file stays as it was,
 /// comments included; a changed option keeps its trailing comment.
+#[cfg(test)]
 pub fn save_options(path: &Path, values: &[(&str, Value)]) -> Result<(), String> {
+    save_settings(path, values, None)
+}
+
+/// Key bindings as config entries, per mode: (sequence, command), an empty
+/// command unbinding the sequence.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct KeyOverrides {
+    pub normal: Vec<(String, String)>,
+    pub visual: Vec<(String, String)>,
+}
+
+/// `save_options`, and with `keys`, make `[keys.normal]` and `[keys.visual]`
+/// say exactly those bindings: entries for the same keys are updated in
+/// place (keeping their spelling and comments), the others removed.
+pub fn save_settings(
+    path: &Path,
+    values: &[(&str, Value)],
+    keys: Option<&KeyOverrides>,
+) -> Result<(), String> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -263,6 +283,10 @@ pub fn save_options(path: &Path, values: &[(&str, Value)]) -> Result<(), String>
             }
         }
     }
+    if let Some(keys) = keys {
+        write_keys(&mut doc, "normal", &keys.normal)?;
+        write_keys(&mut doc, "visual", &keys.visual)?;
+    }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
             .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
@@ -272,6 +296,64 @@ pub fn save_options(path: &Path, values: &[(&str, Value)]) -> Result<(), String>
     std::fs::write(&tmp, doc.to_string())
         .and_then(|()| std::fs::rename(&tmp, path))
         .map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+fn write_keys(
+    doc: &mut toml_edit::DocumentMut,
+    mode: &str,
+    entries: &[(String, String)],
+) -> Result<(), String> {
+    let not_table = || format!("'keys.{mode}' in the config file is not a table");
+    let normalized = |seq: &str| {
+        parse_sequence(seq)
+            .map(|s| crate::input::keymap::seq_to_string(&s))
+            .unwrap_or_else(|_| seq.to_owned())
+    };
+    let mut wanted: Vec<(String, String)> = entries.to_vec();
+    if doc.get("keys").is_none() {
+        if wanted.is_empty() {
+            return Ok(());
+        }
+        let mut keys = toml_edit::Table::new();
+        keys.set_implicit(true);
+        doc.insert("keys", toml_edit::Item::Table(keys));
+    }
+    let keys = doc["keys"]
+        .as_table_like_mut()
+        .ok_or("'keys' in the config file is not a [section]")?;
+    if keys.get(mode).is_none() {
+        if wanted.is_empty() {
+            return Ok(());
+        }
+        keys.insert(mode, toml_edit::table());
+    }
+    let table = keys
+        .get_mut(mode)
+        .and_then(|i| i.as_table_like_mut())
+        .ok_or_else(not_table)?;
+    let existing: Vec<String> = table.iter().map(|(k, _)| k.to_owned()).collect();
+    for key in existing {
+        let found = wanted.iter().position(|(seq, _)| *seq == normalized(&key));
+        match found {
+            Some(i) => {
+                let (_, cmd) = wanted.remove(i);
+                if let Some(old) = table.get_mut(&key).and_then(|i| i.as_value_mut())
+                    && old.as_str() != Some(cmd.as_str())
+                {
+                    let decor = old.decor().clone();
+                    *old = cmd.into();
+                    *old.decor_mut() = decor;
+                }
+            }
+            None => {
+                table.remove(&key);
+            }
+        }
+    }
+    for (seq, cmd) in wanted {
+        table.insert(&seq, toml_edit::Item::Value(cmd.into()));
+    }
+    Ok(())
 }
 
 fn edit_value(v: &Value) -> toml_edit::Value {
@@ -735,6 +817,41 @@ mod tests {
             "[ui\n",
             "left alone"
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn saving_keys_keeps_comments_and_spelling() {
+        let dir = std::env::temp_dir().join(format!("vimpdf-keys-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[ui]\ntoolbar = false\n\n[keys.normal]\n\"<C-S-f>\" = \"fit_page\" # mine\n\"x\" = \"quit\"\n",
+        )
+        .unwrap();
+        let keys = KeyOverrides {
+            normal: vec![
+                ("<C-F>".into(), "fit_width".into()),
+                ("q".into(), String::new()),
+            ],
+            visual: vec![("Y".into(), "yank".into())],
+        };
+        save_settings(&path, &[], Some(&keys)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("\"<C-S-f>\" = \"fit_width\" # mine"),
+            "{text}"
+        );
+        assert!(!text.contains("\"x\""), "{text}");
+        assert!(text.contains("q = \"\""), "{text}");
+        assert!(text.contains("[keys.visual]"), "{text}");
+        assert!(!text.contains("[keys]\n"), "{text}");
+        let (config, warnings) = Config::load(&path);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let (km, _) = config.normal_keymap();
+        let seq = parse_sequence("<C-F>").unwrap();
+        assert_eq!(km.get(&seq), Some(&Command::FitWidth));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

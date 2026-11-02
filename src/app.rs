@@ -321,17 +321,20 @@ impl VimpdfApp {
         use ui::settings::Outcome;
         let window = self.settings.as_mut()?;
         let outcome = window.show(ctx, &mut self.config);
+        if window.apply_keys(&mut self.config) {
+            self.rebuild_keymaps();
+        }
         let mut warnings = Vec::new();
         self.install_font(ctx, &mut warnings);
         self.report_warnings(warnings);
         let mut command = None;
         match outcome? {
-            Outcome::Save(values) => {
+            Outcome::Save { options, keys } => {
                 let Some(path) = self.config_path.clone() else {
                     self.error("no config file location (HOME not set?)");
                     return None;
                 };
-                match crate::config::save_options(&path, &values) {
+                match crate::config::save_settings(&path, &options, keys.as_ref()) {
                     Ok(()) => self.info(format!("Settings saved to {}", path.display())),
                     Err(e) => {
                         // Keep the window open, with the changes, to retry.
@@ -342,6 +345,7 @@ impl VimpdfApp {
             }
             Outcome::Cancel(before) => {
                 self.config = *before;
+                self.rebuild_keymaps();
                 let mut warnings = Vec::new();
                 self.install_font(ctx, &mut warnings);
                 self.report_warnings(warnings);
@@ -350,6 +354,18 @@ impl VimpdfApp {
         }
         self.settings = None;
         command
+    }
+
+    /// The keymaps from the config's bindings (after the Settings window
+    /// changed them).
+    fn rebuild_keymaps(&mut self) {
+        let (keymap, mut warnings) = self.config.normal_keymap();
+        let (visual_keymap, more) = self.config.visual_keymap();
+        warnings.extend(more);
+        self.keymap = keymap;
+        self.visual_keymap = visual_keymap;
+        self.keys.reset();
+        self.report_warnings(warnings);
     }
 
     fn source_config(&mut self, ctx: &egui::Context) {
@@ -632,13 +648,18 @@ impl VimpdfApp {
             Command::ToggleScrollbar => self.config.scrollbar = !self.config.scrollbar,
             Command::EditConfig => self.edit_config(),
             Command::CopyArea => self.start_copy_area(),
-            Command::OpenSettings => {
+            Command::OpenSettings | Command::OpenKeyBindings => {
                 if self.settings.is_none() {
                     let file = self
                         .config_path
                         .as_deref()
                         .map_or_else(Config::default, |p| Config::load(p).0);
                     self.settings = Some(ui::settings::SettingsWindow::new(&self.config, file));
+                }
+                if cmd == Command::OpenKeyBindings
+                    && let Some(settings) = self.settings.as_mut()
+                {
+                    settings.show_keys();
                 }
             }
             Command::ToggleProperties => self.show_props = !self.show_props,
@@ -768,8 +789,14 @@ impl VimpdfApp {
             if !ctx.text_edit_focused() && !egui::Popup::is_any_open(ctx) {
                 let events = ctx.input(|i| i.events.clone());
                 for tok in key_tokens(&events) {
+                    // The key bindings page takes keys being bound as they
+                    // are, and its own keys unless a sequence is pending.
+                    if (settings.recording() || !self.keys.is_pending()) && settings.key(&tok) {
+                        self.keys.reset();
+                        continue;
+                    }
                     if let Some(cmd) = self.keys.feed(&tok, &self.keymap) {
-                        settings.scroll.key(&cmd, self.config.scroll_step);
+                        settings.command(&cmd, self.config.scroll_step);
                     }
                 }
             }

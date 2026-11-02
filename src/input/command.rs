@@ -161,6 +161,8 @@ pub enum Command {
     EditConfig,
     /// The Settings window.
     OpenSettings,
+    /// The Settings window, on its key bindings page.
+    OpenKeyBindings,
     /// Document properties window.
     ToggleProperties,
     /// Open the `:` command line, optionally prefilled.
@@ -264,6 +266,7 @@ const SIMPLE: &[(&str, Command)] = &[
     ("toggle_scrollbar", Command::ToggleScrollbar),
     ("edit_config", Command::EditConfig),
     ("settings", Command::OpenSettings),
+    ("key_bindings", Command::OpenKeyBindings),
     ("properties", Command::ToggleProperties),
     ("redact", Command::RedactSelection),
     ("redact_area", Command::RedactArea),
@@ -291,6 +294,19 @@ const SIMPLE: &[(&str, Command)] = &[
     ("attach_tab", Command::AttachTab),
     ("quit_all", Command::QuitAll),
 ];
+
+/// Commands a key can be bound to without an argument, for the Settings
+/// window: the counted ones (once) and the simple ones, and in visual mode
+/// the caret motions too.
+pub fn bindable(visual: bool) -> Vec<Command> {
+    let mut out: Vec<Command> = Vec::new();
+    if visual {
+        out.extend(Motion::ALL.iter().map(|(_, m)| Command::Move(*m, 1)));
+    }
+    out.extend(COUNTED.iter().map(|(_, make)| make(1)));
+    out.extend(SIMPLE.iter().map(|(_, c)| c.clone()));
+    out
+}
 
 impl Command {
     /// Apply a vim count prefix (`5j`, `12G`).
@@ -465,6 +481,7 @@ pub const EX_COMMANDS: &[&str] = &[
     "saveas",
     "set",
     "settings",
+    "keys",
     "source",
     "tabclose",
     "tabedit",
@@ -546,6 +563,7 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
         "properties" | "info" => Command::ToggleProperties,
         "config" => Command::EditConfig,
         "settings" | "preferences" | "prefs" => Command::OpenSettings,
+        "keys" | "keybindings" | "map" => Command::OpenKeyBindings,
         "o" | "open" | "e" | "edit" if rest.is_empty() => {
             return Err(format!(":{word} needs a file path"));
         }

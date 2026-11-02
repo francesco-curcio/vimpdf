@@ -2,13 +2,16 @@
 //! each. Changes apply at once (like `:set`); Save writes into the config
 //! file every option whose value, as shown, differs from the file's (so
 //! also what `<C-r>`, `<C-t>` or `:set` changed before), Cancel puts
-//! everything back. Key bindings stay in the file.
+//! everything back. A second page lists the key bindings
+//! (`super::keybindings`); gt / gT switch pages.
 
 use eframe::egui::{self, Align2, Grid, RichText, ScrollArea, Vec2};
 use toml::Value;
 
 use super::BAR_DIM;
-use crate::config::Config;
+use super::keybindings::KeysPage;
+use crate::config::{Config, KeyOverrides};
+use crate::input::command::Command;
 
 enum Kind {
     Bool,
@@ -267,8 +270,12 @@ const SECTIONS: &[(&str, &[Setting])] = &[
 ];
 
 pub enum Outcome {
-    /// Write these options into the config file.
-    Save(Vec<(&'static str, Value)>),
+    /// Write these options into the config file, and the key bindings if
+    /// they changed.
+    Save {
+        options: Vec<(&'static str, Value)>,
+        keys: Option<KeyOverrides>,
+    },
     /// Put the config back as it was when the window opened.
     Cancel(Box<Config>),
     /// Open the config file in an editor (key bindings live there).
@@ -284,16 +291,75 @@ pub struct SettingsWindow {
     texts: std::collections::HashMap<&'static str, String>,
     /// Scrolled by the keyboard like the help overlay.
     pub scroll: super::help::HelpScroll,
+    /// Showing the key bindings page instead of the options.
+    on_keys: bool,
+    keys: KeysPage,
+    /// The file's key bindings, as config entries.
+    file_keys: KeyOverrides,
 }
 
 impl SettingsWindow {
     pub fn new(config: &Config, file: Config) -> Self {
+        let file_keys = KeysPage::new(file.normal_keymap().0, file.visual_keymap().0).overrides();
         Self {
             before: config.clone(),
             file,
             texts: Default::default(),
             scroll: Default::default(),
+            on_keys: false,
+            keys: KeysPage::new(config.normal_keymap().0, config.visual_keymap().0),
+            file_keys,
         }
+    }
+
+    /// Open on the key bindings page.
+    pub fn show_keys(&mut self) {
+        self.on_keys = true;
+    }
+
+    /// The key bindings, when they don't match the file's.
+    fn unsaved_keys(&self) -> Option<KeyOverrides> {
+        let keys = self.keys.overrides();
+        (keys != self.file_keys).then_some(keys)
+    }
+
+    /// A key typed while the window has the keyboard; `false` sends it on
+    /// to the keymap (and back to `command`).
+    pub fn key(&mut self, tok: &str) -> bool {
+        self.on_keys && self.keys.key(tok)
+    }
+
+    /// Whether the key bindings page is waiting for keys to bind (they
+    /// must not go through the keymap).
+    pub fn recording(&self) -> bool {
+        self.on_keys && self.keys.recording()
+    }
+
+    /// A command from the keymap: gt / gT switch pages, the rest scroll.
+    pub fn command(&mut self, cmd: &Command, step: f32) {
+        match cmd {
+            Command::NextTab | Command::PrevTab(_) | Command::GotoTab(_) => {
+                self.on_keys = !self.on_keys;
+            }
+            _ if self.on_keys => {
+                self.keys.command(cmd);
+            }
+            _ => {
+                self.scroll.key(cmd, step);
+            }
+        }
+    }
+
+    /// Put the key bindings into `config`, if they changed; true then (the
+    /// app rebuilds its keymaps).
+    pub fn apply_keys(&mut self, config: &mut Config) -> bool {
+        if !self.keys.take_changed() {
+            return false;
+        }
+        let keys = self.keys.overrides();
+        config.normal_keys = keys.normal;
+        config.visual_keys = keys.visual;
+        true
     }
 
     /// Options whose value in `config` isn't what the file gives.
@@ -324,7 +390,24 @@ impl SettingsWindow {
             .show(ctx, |ui| {
                 ui.style_mut().override_font_id =
                     Some(egui::FontId::proportional(font_size.min(18.0)));
-                let mut area = ScrollArea::vertical().max_height(height - 4.0 * font_size);
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(!self.on_keys, "Options").clicked() {
+                        self.on_keys = false;
+                    }
+                    if ui.selectable_label(self.on_keys, "Key bindings").clicked() {
+                        self.on_keys = true;
+                    }
+                    ui.label(RichText::new("gt / gT switch").color(BAR_DIM).small());
+                });
+                ui.separator();
+                if self.on_keys {
+                    // Same size as the options page, so switching doesn't
+                    // resize the window.
+                    ui.set_min_width(font_size.min(18.0) * 40.0);
+                    self.keys
+                        .show(ui, font_size.min(18.0), height - 8.0 * font_size);
+                } else {
+                let mut area = ScrollArea::vertical().max_height(height - 6.0 * font_size);
                 if let Some(offset) = self.scroll.take_requested() {
                     area = area.vertical_scroll_offset(offset);
                 }
@@ -345,38 +428,53 @@ impl SettingsWindow {
                     }
                 });
                 self.scroll.record(&out);
+                }
                 ui.separator();
                 ui.horizontal(|ui| {
                     let unsaved = self.unsaved(config);
+                    let unsaved_keys = self.unsaved_keys();
                     let save = ui
-                        .add_enabled(!unsaved.is_empty(), egui::Button::new("Save to config file"))
+                        .add_enabled(
+                            !unsaved.is_empty() || unsaved_keys.is_some(),
+                            egui::Button::new("Save to config file"),
+                        )
+                        .on_hover_text(if cfg!(target_os = "macos") { "Cmd+S" } else { "Ctrl+S" })
                         .on_disabled_hover_text("The config file already says all this");
-                    if save.clicked() {
-                        outcome = Some(Outcome::Save(unsaved));
+                    // Cmd+S (Ctrl+S elsewhere) saves too.
+                    let save_key = ui.input_mut(|i| {
+                        i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)
+                    });
+                    let can_save = !unsaved.is_empty() || unsaved_keys.is_some();
+                    if save.clicked() || (save_key && can_save && !self.keys.recording()) {
+                        outcome = Some(Outcome::Save {
+                            options: unsaved,
+                            keys: unsaved_keys,
+                        });
                     }
                     if ui.button("Cancel").clicked() {
                         outcome = Some(Outcome::Cancel(Box::new(self.before.clone())));
                     }
                     if ui
-                        .button("Key bindings…")
-                        .on_hover_text("Key bindings are set in the config file ([keys.normal], [keys.visual])")
+                        .button("Open config file")
+                        .on_hover_text("Edit the config file in your editor (Cancel these changes first, or Save them)")
                         .clicked()
                     {
                         outcome = Some(Outcome::EditFile);
                     }
                 });
-                ui.label(
-                    RichText::new(
-                        "Changes apply now; Save keeps them for next time. \
-                         j k, <C-d> <C-u>, gg G scroll.",
-                    )
-                        .color(BAR_DIM)
-                        .small(),
-                );
+                let hint = if self.on_keys {
+                    "j k pick a command, h l one of its keys · a / Enter add a key · \
+                     x remove it · r reset · v normal / visual · / filter"
+                } else {
+                    "Changes apply now; Save (Cmd+S / Ctrl+S) keeps them for next time. \
+                     j k, <C-d> <C-u>, gg G scroll."
+                };
+                ui.label(RichText::new(hint).color(BAR_DIM).small());
             });
         let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape))
             && !ctx.text_edit_focused()
-            && !popup_open;
+            && !popup_open
+            && !self.keys.take_esc_used();
         if outcome.is_none() && (!open || escape) {
             outcome = Some(Outcome::Cancel(Box::new(self.before.clone())));
         }
@@ -602,6 +700,24 @@ mod tests {
         config.recolor = false;
         config.zoom_step = 1.5;
         assert!(w.unsaved(&config).is_empty());
+    }
+
+    #[test]
+    fn key_bindings_page_changes_the_config_and_counts_as_unsaved() {
+        let mut config = Config::default();
+        let mut w = SettingsWindow::new(&config, Config::default());
+        // Its keys only work on its page; gt gets there.
+        assert!(!w.key("a"));
+        w.command(&Command::NextTab, 1.0);
+        assert!(w.key("/"));
+        w.keys = KeysPage::new(config.normal_keymap().0, config.visual_keymap().0);
+        for tok in ["a", "<C-x>", "<CR>"] {
+            assert!(w.key(tok));
+        }
+        assert!(w.apply_keys(&mut config));
+        assert_eq!(config.normal_keys.len(), 1);
+        assert!(w.unsaved_keys().is_some());
+        assert!(!w.apply_keys(&mut config), "nothing new");
     }
 
     #[test]

@@ -13,7 +13,14 @@ if `XDG_CONFIG_HOME` is set; the same path on macOS, rather than
   Changes apply as you make them; Save writes every option whose value
   differs from the config file's (including what `<C-r>`, `<C-t>` or `:set`
   changed before), leaving the rest of the file (comments included) as it is.
-  Cancel or `Esc` undoes them. Key bindings are edited in the file.
+  Cancel or `Esc` undoes them. `Cmd+S` (`Ctrl+S`) saves.
+- `:keys` (Edit → Key bindings…) opens the same window on its key bindings
+  page (`gt` switches pages): every command with its keys, for normal and
+  visual mode. Add a key by pressing it (`a` or `+`, the key or keys, Enter;
+  the page says which binding it would replace or stop), remove one (`x` or
+  click it), reset a command (`r`, `↺`) or everything (Reset all). Saving
+  writes what differs from the defaults as `[keys.normal]` / `[keys.visual]`
+  entries, replacing the ones there; the rest of the file stays as it is.
 
 ## Options
 
