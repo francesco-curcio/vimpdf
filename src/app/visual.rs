@@ -262,8 +262,15 @@ impl VimpdfApp {
                 painter.rect_filled(to_screen(page, &r), 1.0, fill);
             }
         }
+        // The caret is as tall as the selection's lines.
+        let caret_rect = self.view.text(sel.caret.page).and_then(|pt| {
+            let idx = sel.caret.idx;
+            pt.shaped_rects((idx, idx), crate::text::Shape::Lines)
+                .into_iter()
+                .next()
+        });
         if self.mode == Mode::Visual
-            && let Some(r) = text.rect_at(sel.caret)
+            && let Some(r) = caret_rect
         {
             let rect = to_screen(sel.caret.page, &r);
             let caret = Rect::from_min_size(
