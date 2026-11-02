@@ -329,10 +329,12 @@ impl Keymap {
         for n in 1..=9 {
             k.bind(&format!("<{modifier}-{n}>"), GotoTab(n));
         }
-        // Cmd+W closes the tab, as in every Mac app. Ctrl+W isn't bound
-        // elsewhere by default (`"<C-w>" = "quit"` in the config does it).
+        // Cmd+W closes the tab and Cmd+T opens one, as in every Mac app.
+        // Elsewhere Ctrl+W is free and Ctrl+T toggles the toolbar; the
+        // config can bind them (`"<C-w>" = "quit"`).
         if cfg!(target_os = "macos") {
             k.bind("<D-w>", Quit);
+            k.bind("<D-t>", NewTab);
         }
         k
     }
@@ -663,6 +665,9 @@ mod tests {
             let mut st = KeyState::default();
             assert_eq!(feed_all(&mut st, &km, &["<D-w>"]), vec![Command::Quit]);
         }
+        let mut st = KeyState::default();
+        let km = Keymap::default_normal();
+        assert_eq!(feed_all(&mut st, &km, &["<D-t>"]), vec![Command::NewTab]);
     }
 
     #[test]

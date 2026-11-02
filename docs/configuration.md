@@ -197,7 +197,7 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `next_tab` | `gt`, `<C-PageDown>`, `<C-Tab>` (with a count: that tab) |
 | `prev_tab` | `gT`, `<C-PageUp>`, `<C-S-Tab>` |
 | `goto_tab <n>` | `<D-1>`…`<D-9>` on macOS, `<A-1>`…`<A-9>` elsewhere |
-| `new_tab` | — (`:tabnew`) |
+| `new_tab` | `<D-t>` on macOS (`:tabnew`) |
 | `toggle_scrollbar` | — (`:set scrollbar`, View → Scrollbar) |
 | `detach_tab` | — (`:detach`: move the tab to a new window) |
 | `attach_tab` | — (`:attach`: move the tab to the main window) |
