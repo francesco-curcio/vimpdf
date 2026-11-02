@@ -64,4 +64,5 @@ color = "#c92a2a"
 # Examples (not defaults):
 # "x" = "scroll_down 3"
 # "<C-F>" = "toggle_fullscreen"
+# "<C-w>" = "quit"      # close the tab with Ctrl+W (Cmd+W on macOS by default)
 # "q" = ""              # unbind

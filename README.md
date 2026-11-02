@@ -170,7 +170,7 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `<C-F>` | Toggle fullscreen |
 | `r` | Reload the document, keeping the position |
 | `Esc` | Cancel a pending count/key sequence, clear the message and search highlights, close help |
-| `q` | Close the tab (the last one quits); refused with unsaved annotations |
+| `q`, `Cmd+W` (macOS) | Close the tab (the last one quits); refused with unsaved annotations |
 | `gt` / `gT` | Next / previous tab; `3gt` goes to tab 3 |
 | `<C-PageDown>` / `<C-PageUp>`, `<C-Tab>` / `<C-S-Tab>` | Next / previous tab |
 | `Cmd+1`…`Cmd+9` (macOS), `Alt+1`…`Alt+9` (Linux) | Tab 1…9 |

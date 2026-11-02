@@ -116,6 +116,7 @@ on the page as a PDF `FreeText` annotation, in Helvetica.
 "x" = "scroll_down 3"
 "<C-F>" = "toggle_fullscreen"
 "gp" = "goto_page 1"
+"<C-w>" = "quit"    # close the tab with Ctrl+W (Cmd+W already does on macOS)
 "q" = ""            # an empty command unbinds the key
 ```
 
@@ -200,7 +201,7 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `source` | — |
 | `open <path>` | — |
 | `cancel` | `<Esc>` |
-| `quit` | `q` (closes the tab; the last one quits) |
+| `quit` | `q`, `<D-w>` on macOS (closes the tab; the last one quits) |
 
 Visual mode only:
 
