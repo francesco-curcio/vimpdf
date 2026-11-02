@@ -6,12 +6,12 @@ use eframe::egui::{Stroke, StrokeKind};
 use super::place::{Purpose, REDACT_RED};
 use super::*;
 use crate::annotate::{AnnotKind, EditRequest, NewAnnot};
-use crate::text::TextRect;
+use crate::text::{Shape, TextRect};
 
 impl VimpdfApp {
     /// `x` in visual mode.
     pub(super) fn redact_selection(&mut self) {
-        let parts = self.selection_parts();
+        let parts = self.selection_parts(Shape::Tight);
         if parts.is_empty() {
             return self.error("Nothing selected");
         }

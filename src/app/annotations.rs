@@ -6,7 +6,7 @@ use eframe::egui::{Pos2, Stroke, StrokeKind};
 use super::place::{NOTE_SIZE, note_icon, step_size};
 use super::*;
 use crate::annotate::{AnnotInfo, AnnotKind, EditEvent, EditRequest, NewAnnot};
-use crate::text::TextRect;
+use crate::text::{Shape, TextRect};
 use crate::ui::comment::{CommentEditor, Outcome as CommentOutcome};
 
 /// Within this long, a second attempt to close the window with unsaved
@@ -69,15 +69,17 @@ impl VimpdfApp {
         Some([c.0[0], c.0[1], c.0[2]])
     }
 
-    /// The selection as rectangles per page.
-    pub(super) fn selection_parts(&self) -> Vec<(usize, Vec<TextRect>)> {
+    /// The selection as rectangles per page, shaped as `shape`.
+    pub(super) fn selection_parts(&self, shape: Shape) -> Vec<(usize, Vec<TextRect>)> {
         let Some(sel) = self.selection else {
             return Vec::new();
         };
         let text = self.view.doc_text();
         sel.page_spans(&text)
             .into_iter()
-            .filter_map(|(page, a, b)| Some((page, self.view.text(page)?.rects((a, b)))))
+            .filter_map(|(page, a, b)| {
+                Some((page, self.view.text(page)?.shaped_rects((a, b), shape)))
+            })
             .filter(|(_, rects)| !rects.is_empty())
             .collect()
     }
@@ -98,7 +100,7 @@ impl VimpdfApp {
                 "No colour '{letter}' (colours: {letters}, or a for the last one)"
             ));
         };
-        let parts = self.selection_parts();
+        let parts = self.selection_parts(Shape::Lines);
         if parts.is_empty() {
             return self.error("Nothing selected");
         }
@@ -116,7 +118,7 @@ impl VimpdfApp {
     /// `c` in visual mode: write a comment; the highlight is created when
     /// it's saved.
     pub(super) fn comment_on_selection(&mut self) {
-        let parts = self.selection_parts();
+        let parts = self.selection_parts(Shape::Lines);
         if parts.is_empty() {
             return self.error("Nothing selected");
         }

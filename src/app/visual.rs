@@ -258,7 +258,7 @@ impl VimpdfApp {
             let Some(pt) = self.view.text(page) else {
                 continue;
             };
-            for r in pt.rects((a, b)) {
+            for r in pt.shaped_rects((a, b), crate::text::Shape::Block) {
                 painter.rect_filled(to_screen(page, &r), 1.0, fill);
             }
         }

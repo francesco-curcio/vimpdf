@@ -111,9 +111,16 @@ impl VimpdfApp {
                 continue;
             };
             let p = layout.page(page);
+            let text = self.view.text(page);
             for (i, found) in matches.iter().enumerate() {
                 let current = search.current == Some((page, i));
-                for t in &found.rects {
+                // Full line height when the page's text is at hand; the
+                // match's own (tight) rectangles otherwise.
+                let rects = match text {
+                    Some(text) => text.shaped_rects(found.span, crate::text::Shape::Lines),
+                    None => found.rects.clone(),
+                };
+                for t in &rects {
                     let (ax, ay) = vp.to_view(p.x + t.x0, p.y + t.y0);
                     let (bx, by) = vp.to_view(p.x + t.x1, p.y + t.y1);
                     let rect = Rect::from_min_max(

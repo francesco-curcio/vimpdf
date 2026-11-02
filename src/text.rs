@@ -148,29 +148,126 @@ impl PageText {
         out
     }
 
-    /// Rectangles covering characters `start..=end`, one per line.
-    pub fn rects(&self, (start, end): Span) -> Vec<TextRect> {
+    /// Rectangles covering characters `start..=end`, one per line, as tight
+    /// as the glyphs.
+    pub fn rects(&self, span: Span) -> Vec<TextRect> {
+        self.shaped_rects(span, Shape::Tight)
+    }
+
+    /// Rectangles covering characters `start..=end`, one per line, shaped
+    /// as `shape` says.
+    pub fn shaped_rects(&self, (start, end): Span, shape: Shape) -> Vec<TextRect> {
         let mut out = Vec::new();
-        for line in &self.lines {
-            let from = start.max(line.start);
-            let to = end.min(line.end.saturating_sub(1));
-            if from > to || line.is_empty() {
-                continue;
+        for (bi, block) in self.blocks.iter().enumerate() {
+            for li in block.clone() {
+                let line = &self.lines[li];
+                let from = start.max(line.start);
+                let to = end.min(line.end.saturating_sub(1));
+                if from > to || line.is_empty() {
+                    continue;
+                }
+                let Some(mut rect) = self.chars[from..=to]
+                    .iter()
+                    .map(|c| TextRect {
+                        x0: c.x0,
+                        y0: c.y0,
+                        x1: c.x1,
+                        y1: c.y1,
+                    })
+                    .reduce(TextRect::union)
+                else {
+                    continue;
+                };
+                if shape != Shape::Tight {
+                    (rect.y0, rect.y1) = self.line_band(bi, li);
+                }
+                if shape == Shape::Block {
+                    let (left, right) = self.column_edges(bi, li);
+                    // Lines the selection comes from or goes on to reach the
+                    // column's edge (but a paragraph's last line ends with
+                    // its text).
+                    if start < line.start {
+                        rect.x0 = left;
+                    }
+                    if end >= line.end && li + 1 < block.end {
+                        rect.x1 = right;
+                    }
+                }
+                out.push(rect);
             }
-            let rect = self.chars[from..=to]
-                .iter()
-                .map(|c| TextRect {
-                    x0: c.x0,
-                    y0: c.y0,
-                    x1: c.x1,
-                    y1: c.y1,
-                })
-                .reduce(TextRect::union);
-            out.extend(rect);
         }
         out
     }
+
+    /// Top and bottom of line `li` (in block `bi`) as a band of text: from
+    /// its font size and baseline, stretched to meet the lines above and
+    /// below in the same paragraph, so selected lines form one shape.
+    fn line_band(&self, bi: usize, li: usize) -> (f32, f32) {
+        let block = &self.blocks[bi];
+        let band = |li: usize| {
+            let m = Metrics::of(&self.chars[self.lines[li].clone()]);
+            (
+                m.baseline - ASCENT * m.size,
+                m.baseline + DESCENT * m.size,
+                m.size,
+            )
+        };
+        let own = band(li);
+        // Where two bands meet: halfway across the gap, if the lower line is
+        // stacked right below the upper (not at the top of the next column).
+        let meet = |upper: (f32, f32, f32), lower: (f32, f32, f32)| {
+            let gap = lower.0 - upper.1;
+            let stacked = lower.0 > upper.0 + 0.5 * upper.2.min(lower.2);
+            (stacked && gap < upper.2.max(lower.2)).then(|| (upper.1 + lower.0) / 2.0)
+        };
+        let pad = EDGE_PAD * own.2;
+        let top = (li > block.start)
+            .then(|| meet(band(li - 1), own))
+            .flatten()
+            .unwrap_or(own.0 - pad);
+        let bottom = (li + 1 < block.end)
+            .then(|| meet(own, band(li + 1)))
+            .flatten()
+            .unwrap_or(own.1 + pad);
+        (top, bottom)
+    }
+
+    /// Left and right edges of the column line `li` is in: the extent of
+    /// the lines of its block that overlap it horizontally (a block can
+    /// continue into the next column).
+    fn column_edges(&self, bi: usize, li: usize) -> (f32, f32) {
+        let extent = |li: usize| {
+            let (x0, _, x1, _) = line_box(&self.chars[self.lines[li].clone()]);
+            (x0, x1)
+        };
+        let (x0, x1) = extent(li);
+        self.blocks[bi]
+            .clone()
+            .map(extent)
+            .filter(|&(a, b)| a < x1 && b > x0)
+            .fold((x0, x1), |(l, r), (a, b)| (l.min(a), r.max(b)))
+    }
 }
+
+/// How rectangles over text are shaped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    /// As tight as the glyphs: for redaction, which shouldn't cover more
+    /// than the text.
+    Tight,
+    /// Full line height, meeting the lines above and below: for saved
+    /// highlights and search matches.
+    Lines,
+    /// Like `Lines`, and lines a selection runs through span the column,
+    /// like Okular's: for the selection.
+    Block,
+}
+
+/// A line's text band, in font sizes above and below the baseline.
+const ASCENT: f32 = 0.85;
+const DESCENT: f32 = 0.25;
+/// Padding (in font sizes) above a paragraph's first line and below its last.
+const EDGE_PAD: f32 = 0.08;
 
 fn line_box(line: &[TextChar]) -> (f32, f32, f32, f32) {
     line.iter().fold(
@@ -456,6 +553,45 @@ pub mod tests {
         assert_eq!(r.len(), 2);
         assert_eq!((r[0].x0, r[0].x1, r[0].y0), (40.0, 70.0, 0.0));
         assert_eq!((r[1].x0, r[1].x1, r[1].y0), (0.0, 30.0, 20.0));
+    }
+
+    #[test]
+    fn line_rects_meet_between_lines_of_a_paragraph() {
+        // Baselines 12, 32, 52; size 15: bands -0.75–15.75, 19.25–35.75, …
+        let p = page("aaa bbb\nccc ddd\neee\n\nfff");
+        let m = p.find("bbb ccc ddd eee", false)[0];
+        let r = p.shaped_rects(m, Shape::Lines);
+        assert_eq!(r.len(), 3);
+        assert_eq!((r[0].x0, r[0].x1), (40.0, 70.0));
+        assert!(
+            (r[0].y0 - (-0.75 - 1.2)).abs() < 0.01,
+            "padded top {}",
+            r[0].y0
+        );
+        assert_eq!(r[0].y1, r[1].y0);
+        assert_eq!(r[1].y1, r[2].y0);
+        assert!((r[0].y1 - 17.5).abs() < 0.01);
+        // The next paragraph's line isn't reached for.
+        let f = p.shaped_rects(p.find("fff", false)[0], Shape::Lines);
+        assert!(f[0].y0 > r[2].y1);
+    }
+
+    #[test]
+    fn block_rects_span_the_column_between_the_ends() {
+        let p = page("aaa bbb\nccc ddd\neee fff ggg\nhh");
+        let m = p.find("bbb ccc ddd eee", false)[0];
+        let r = p.shaped_rects(m, Shape::Block);
+        // First line: from the selection to the column's right edge; middle
+        // line: the whole column; last: from the left edge to the end.
+        assert_eq!((r[0].x0, r[0].x1), (40.0, 110.0));
+        assert_eq!((r[1].x0, r[1].x1), (0.0, 110.0));
+        assert_eq!((r[2].x0, r[2].x1), (0.0, 30.0));
+        // A paragraph's last line isn't stretched past its text.
+        let m = p.find("ggg hh", false)[0];
+        let r = p.shaped_rects(m, Shape::Block);
+        assert_eq!((r[1].x0, r[1].x1), (0.0, 20.0));
+        // Tight stays as it was.
+        assert_eq!(p.rects(m)[0].y0, 40.0);
     }
 
     fn ch(c: char, x: f32, y: f32) -> TextChar {
