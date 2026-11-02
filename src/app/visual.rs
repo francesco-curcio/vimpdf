@@ -272,9 +272,16 @@ impl VimpdfApp {
         if self.mode == Mode::Visual
             && let Some(r) = caret_rect
         {
+            // On the selection's edge: the caret's character is selected,
+            // so after it when selecting forwards, before it backwards.
             let rect = to_screen(sel.caret.page, &r);
+            let x = if sel.caret >= sel.anchor {
+                rect.max.x
+            } else {
+                rect.min.x
+            };
             let caret = Rect::from_min_size(
-                rect.min - Vec2::new(1.0, 0.0),
+                egui::pos2(x - 1.0, rect.min.y),
                 Vec2::new(2.0, rect.height()),
             );
             painter.rect_filled(caret, 0.0, color32(self.config.colors.caret));
