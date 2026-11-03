@@ -21,6 +21,7 @@ use crate::view::DocView;
 use crate::viewport::{FitMode, Viewport};
 
 mod annotations;
+mod confirm;
 mod hints;
 mod menu;
 mod place;
@@ -100,6 +101,8 @@ pub struct VimpdfApp {
     /// An image to put on the clipboard (`Y`), sent at the end of the frame.
     clipboard_image: Option<egui::ColorImage>,
     link_preview: preview::LinkPreview,
+    /// A yes/no question in the status bar.
+    confirm: Option<confirm::Confirm>,
     /// When the mouse last moved, to hide an idle pointer.
     pointer_active: Instant,
     /// The outline layout as last written to `ui.toml`.
@@ -172,6 +175,7 @@ impl VimpdfApp {
             restore_active: None,
             clipboard_image: None,
             link_preview: Default::default(),
+            confirm: None,
         };
         app.install_font(ctx, &mut warnings);
         app.restore_ui_state();
@@ -444,6 +448,9 @@ impl VimpdfApp {
 
     fn execute(&mut self, cmd: Command, ctx: &egui::Context) {
         tracing::trace!(?cmd, "command");
+        if self.ask_for_missing_folder(&cmd) {
+            return;
+        }
         let step = self.config.scroll_step;
         let (screen, zoom_step) = match &self.viewport {
             Some(vp) => (vp.height, self.config.zoom_step),
@@ -783,6 +790,15 @@ impl VimpdfApp {
                 tracing::trace!(?toks, mode = ?self.mode, "keys");
             }
         }
+        // A question in the status bar takes the next key.
+        if self.confirm.is_some() {
+            let events = ctx.input(|i| i.events.clone());
+            if let Some(tok) = key_tokens(&events).into_iter().next() {
+                self.keys.reset();
+                self.confirm_key(ctx, &tok);
+            }
+            return Vec::new();
+        }
         // The Settings window takes the keyboard: scrolling keys scroll it,
         // its own Esc closes it, text fields get what's typed in them.
         if let Some(settings) = self.settings.as_mut() {
@@ -966,7 +982,10 @@ impl eframe::App for VimpdfApp {
             area.min.y += h;
             r
         });
-        let bottom_rect = (self.config.statusbar || self.mode != Mode::Normal).then(|| {
+        let bottom_rect = (self.config.statusbar
+            || self.mode != Mode::Normal
+            || self.confirm.is_some())
+        .then(|| {
             let h = ui::bar_height(font_size);
             area.max.y -= h;
             Rect::from_min_size(area.left_bottom(), Vec2::new(area.width(), h))
@@ -1211,7 +1230,10 @@ impl eframe::App for VimpdfApp {
                     zoom_percent: vp.zoom * 100.0,
                     pending: self.keys.pending_display(),
                     search: self.search_status(),
-                    message: self.message.as_ref().map(|m| (m.text.as_str(), m.error)),
+                    message: match &self.confirm {
+                        Some(c) => Some((c.question.as_str(), false)),
+                        None => self.message.as_ref().map(|m| (m.text.as_str(), m.error)),
+                    },
                     font_size,
                 };
                 ui_commands.extend(statusbar::show(ui, rect, &status));

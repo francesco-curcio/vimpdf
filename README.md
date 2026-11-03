@@ -286,7 +286,7 @@ steps through them, `Shift+Tab` backwards.
 | `:help` | Help overlay |
 | `:w` | Save annotations into the PDF |
 | `:w <path>` | Save a copy with the annotations |
-| `:saveas <path>` | Save a copy with the annotations and continue in it |
+| `:saveas <path>` | Save a copy with the annotations and continue in it. If the folder doesn't exist, vimpdf asks first (`y` creates it and saves, any other key cancels); the same for `:w <path>` and `:redact <path>` |
 | `:w!` | Save into a temporary copy anyway (see "PDFs from the browser") |
 | `:annotated` | Open the other copy of this paper that has your annotations |
 | `:wq`, `:x` | Save and close the tab |
