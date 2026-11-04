@@ -167,7 +167,7 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `<Tab>` | Outline (table of contents) panel. Inside it: `j`/`k`, Enter to jump, `p` to keep it open beside the pages (`<Tab>` then moves the keys between it and the pages), `<`/`>` to make it narrower or wider (pin and width are remembered), `Esc` to leave it. Long titles wrap |
 | `<C-r>` | Toggle recolor (dark mode) |
 | `<C-t>` | Toggle the toolbar |
-| `<C-F>` | Toggle fullscreen |
+| `<C-F>` | Toggle fullscreen. The menu bar, tab bar and toolbar hide in it (`gm` still opens the menus, `gt`/`gT` still switch tabs); the status bar stays |
 | `r` | Reload the document, keeping the position |
 | `Esc` | Cancel a pending count/key sequence, clear the message and search highlights, close help |
 | `q`, `Cmd+W` (macOS) | Close the tab (the last one quits); refused with unsaved annotations |

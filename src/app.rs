@@ -964,19 +964,23 @@ impl eframe::App for VimpdfApp {
         // Split the window: toolbar, pages, status bar / command line.
         let font_size = self.config.font_size;
         let mut area = ui.max_rect();
-        let menubar_rect = (self.config.menubar || self.mode == Mode::Menu).then(|| {
-            let h = ui::bar_height(font_size);
-            let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
-            area.min.y += h;
-            r
-        });
-        let tabbar_rect = self.config.tabbar.then(|| {
+        // Fullscreen is for reading: the bars above the pages step aside.
+        // The menu bar still opens from the keyboard.
+        let top_bars = !ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        let menubar_rect =
+            ((self.config.menubar && top_bars) || self.mode == Mode::Menu).then(|| {
+                let h = ui::bar_height(font_size);
+                let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
+                area.min.y += h;
+                r
+            });
+        let tabbar_rect = (self.config.tabbar && top_bars).then(|| {
             let h = ui::tabbar::height(font_size);
             let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
             area.min.y += h;
             r
         });
-        let toolbar_rect = self.config.toolbar.then(|| {
+        let toolbar_rect = (self.config.toolbar && top_bars).then(|| {
             let h = toolbar::height(font_size);
             let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
             area.min.y += h;
