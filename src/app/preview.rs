@@ -24,6 +24,10 @@ const HEIGHT: f32 = 320.0;
 const CONTEXT: f32 = 14.0;
 /// Rendered pages kept around the ones in view, to scroll back to.
 const KEEP_PAGES: usize = 2;
+/// The longest side of a rendered page, in pixels: far longer than a normal
+/// page, and textures can't be larger than the GPU allows. Beyond it, only a
+/// band of the page around the view is rendered.
+const MAX_PIXELS: usize = 4096;
 
 /// The open popup. `left` and `top` are the document point at its corner.
 struct Popup {
@@ -76,6 +80,30 @@ impl LinkPreview {
 fn strip_top(y: Option<f32>, page_height: f32, height: f32) -> f32 {
     let top = y.map_or(0.0, |y| y - CONTEXT);
     top.min(page_height - height).max(0.0)
+}
+
+/// The part of a page of `height` points to render, as (top, height): all of
+/// it if it's no taller than `tallest`, else a band around the part in view.
+fn page_band(height: f32, tallest: f32, view: (f32, f32)) -> (f32, f32) {
+    if height <= tallest {
+        return (0.0, height);
+    }
+    let middle = (view.0 + view.1) / 2.0;
+    (
+        (middle - tallest / 2.0).clamp(0.0, height - tallest),
+        tallest,
+    )
+}
+
+/// Whether what's rendered in `have` will do for `want`: the same page the
+/// same way, including the part `view` of it.
+fn covers(have: &PreviewRequest, want: &PreviewRequest, view: (f32, f32)) -> bool {
+    let same = PreviewRequest {
+        top: have.top,
+        height: have.height,
+        ..want.clone()
+    };
+    *have == same && have.top <= view.0 && have.top + have.height >= view.1
 }
 
 /// The position after `current` in a list of `len`, wrapping around.
@@ -340,21 +368,27 @@ impl VimpdfApp {
     /// Render the popup's pages, one at a time. True when they're all in.
     fn request_pages(&mut self, ctx: &egui::Context, popup: &Popup) -> bool {
         let visible = self.popup_pages(popup);
-        let scale = popup.zoom * ctx.pixels_per_point();
+        let full_scale = popup.zoom * ctx.pixels_per_point();
+        let limit = ctx.input(|i| i.max_texture_side).min(MAX_PIXELS) as f32 - 2.0;
         let recolor = self.recolor();
-        let wanted: Vec<PreviewRequest> = visible
+        let bottom = popup.top + popup.doc_height();
+        let wanted: Vec<(PreviewRequest, (f32, f32))> = visible
             .clone()
             .map(|page| {
                 let r = self.view.layout.page(page);
-                PreviewRequest {
+                let scale = full_scale.min(limit / r.w);
+                let view = ((popup.top - r.y).max(0.0), (bottom - r.y).min(r.h));
+                let (top, height) = page_band(r.h, limit / scale, view);
+                let request = PreviewRequest {
                     source: self.view.render_source.clone(),
                     page,
-                    top: 0.0,
+                    top,
                     width: r.w,
-                    height: r.h,
+                    height,
                     scale,
                     recolor,
-                }
+                };
+                (request, view)
             })
             .collect();
         let preview = &mut self.link_preview;
@@ -381,10 +415,11 @@ impl VimpdfApp {
         preview
             .pages
             .retain(|page, _| page.abs_diff(visible.start) <= KEEP_PAGES);
-        let missing = wanted
-            .into_iter()
-            .find(|want| preview.pages.get(&want.page).is_none_or(|(r, _)| r != want));
-        let Some(want) = missing else {
+        let missing = wanted.into_iter().find(|(want, view)| {
+            let have = preview.pages.get(&want.page);
+            !have.is_some_and(|(have, _)| covers(have, want, *view))
+        });
+        let Some((want, _)) = missing else {
             return true;
         };
         if preview.requested.as_ref() != Some(&want) {
@@ -404,14 +439,14 @@ impl VimpdfApp {
             let r = layout.page(page);
             let page_rect =
                 Rect::from_min_size(on_screen(r.x, r.y), Vec2::new(r.w, r.h) * popup.zoom);
-            match self.link_preview.pages.get(&page) {
-                Some((_, texture)) => {
-                    let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                    painter.image(texture.id(), page_rect, uv, Color32::WHITE);
-                }
-                None => {
-                    painter.rect_filled(page_rect, 0.0, self.page_color());
-                }
+            painter.rect_filled(page_rect, 0.0, self.page_color());
+            if let Some((rendered, texture)) = self.link_preview.pages.get(&page) {
+                let band = Rect::from_min_size(
+                    on_screen(r.x, r.y + rendered.top),
+                    Vec2::new(r.w, rendered.height) * popup.zoom,
+                );
+                let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                painter.image(texture.id(), band, uv, Color32::WHITE);
             }
         }
         if let Some((page, i)) = popup.selected
@@ -507,6 +542,44 @@ mod tests {
         assert_eq!(strip_top(Some(5.0), 800.0, 200.0), 0.0, "top of the page");
         assert_eq!(strip_top(Some(790.0), 800.0, 200.0), 600.0, "bottom");
         assert_eq!(strip_top(None, 800.0, 200.0), 0.0, "no position: the top");
+    }
+
+    #[test]
+    fn a_page_too_tall_for_a_texture_is_rendered_around_the_view() {
+        assert_eq!(page_band(800.0, 1000.0, (100.0, 300.0)), (0.0, 800.0));
+        assert_eq!(
+            page_band(20000.0, 1000.0, (5000.0, 5200.0)),
+            (4600.0, 1000.0)
+        );
+        assert_eq!(page_band(20000.0, 1000.0, (0.0, 200.0)), (0.0, 1000.0));
+        assert_eq!(
+            page_band(20000.0, 1000.0, (19800.0, 20000.0)),
+            (19000.0, 1000.0)
+        );
+    }
+
+    #[test]
+    fn a_rendered_band_serves_while_the_view_stays_inside_it() {
+        let band = PreviewRequest {
+            source: "a.pdf".into(),
+            page: 1,
+            top: 4600.0,
+            width: 600.0,
+            height: 1000.0,
+            scale: 2.0,
+            recolor: None,
+        };
+        let want = PreviewRequest {
+            top: 4700.0,
+            ..band.clone()
+        };
+        assert!(covers(&band, &want, (5000.0, 5200.0)));
+        assert!(!covers(&band, &want, (5500.0, 5700.0)), "scrolled past it");
+        let sharper = PreviewRequest {
+            scale: 3.0,
+            ..want.clone()
+        };
+        assert!(!covers(&band, &sharper, (5000.0, 5200.0)));
     }
 
     #[test]
