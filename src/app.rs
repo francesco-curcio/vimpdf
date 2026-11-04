@@ -738,8 +738,8 @@ impl VimpdfApp {
         self.pending_scroll = Vec2::ZERO;
     }
 
-    /// Files opened from outside (Finder, Dock, browser) or dropped on the
-    /// window replace the current document.
+    /// Files opened from outside (Finder, Dock, browser), dropped on the
+    /// window or restored from the last session each get a tab.
     fn open_external_files(&mut self, ctx: &egui::Context) {
         let mut paths = crate::platform::take_opened();
         paths.extend(ctx.input(|i| {
@@ -753,10 +753,21 @@ impl VimpdfApp {
         if paths.is_empty() {
             return;
         }
-        for path in paths {
+        let mut paths = paths.into_iter();
+        for path in paths.by_ref() {
             self.execute(Command::Open(path), ctx);
+            // Replacing the start page drops the viewport until the next
+            // frame, and commands need one: the rest wait for it.
+            if self.viewport.is_none() {
+                break;
+            }
         }
-        self.show_restored_tab(ctx);
+        let rest: Vec<_> = paths.collect();
+        if rest.is_empty() {
+            self.show_restored_tab(ctx);
+        } else {
+            crate::platform::push_opened(rest);
+        }
         ctx.send_viewport_cmd(ViewportCommand::Focus);
         crate::platform::activate();
     }
