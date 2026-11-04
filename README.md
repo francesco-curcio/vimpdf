@@ -94,6 +94,7 @@ fish_add_path ~/.cargo/bin   # once, if ~/.cargo/bin isn't on your PATH
 ```fish
 scripts/bundle-macos.sh             # builds target/vimpdf.app
 scripts/bundle-macos.sh --install   # …copies it to ~/Applications and updates the `vimpdf` command
+scripts/macos-signing-cert.sh       # once: macOS stops asking for folder access after each update
 ```
 
 The bundle declares PDF as a document type it can view, so after installing

@@ -47,9 +47,13 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature, so macOS runs the locally built bundle.
-codesign --force --sign - "$app" >/dev/null 2>&1 || echo "warning: codesign failed"
-echo "built $app"
+# Sign so macOS runs the locally built bundle. With the certificate from
+# macos-signing-cert.sh the app keeps its identity across builds, so macOS
+# remembers its permissions; an ad-hoc signature ("-") is new every build.
+identity="vimpdf local signing"
+security find-identity -v -p codesigning | grep -qF "\"$identity\"" || identity=-
+codesign --force --sign "$identity" "$app" >/dev/null 2>&1 || echo "warning: codesign failed"
+echo "built $app (signed with: $identity)"
 
 if [[ "${1:-}" == "--install" ]]; then
     mkdir -p "$HOME/Applications"

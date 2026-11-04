@@ -183,7 +183,10 @@ replaced). Opened paths are queued; a file opened while launching is already
 queued when eframe creates the app, later ones are picked up each frame.
 Without a document vimpdf opens `welcome.rs`'s generated one-page PDF.
 `scripts/bundle-macos.sh` builds the `.app` with an `Info.plist` declaring
-`com.adobe.pdf` as a viewable document type.
+`com.adobe.pdf` as a viewable document type. It signs with the certificate
+from `scripts/macos-signing-cert.sh` when present, and ad-hoc otherwise. macOS
+ties privacy permissions to the app's identity, which for an ad-hoc signature
+is the hash of that build, so only the certificate keeps them across updates.
 
 ## Annotations
 
