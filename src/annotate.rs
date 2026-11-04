@@ -315,15 +315,23 @@ fn new_work_dir() -> PathBuf {
 /// Remove this process's working copies (on quit: the editor threads may not
 /// get to clean up before the process exits).
 pub fn remove_own_work_dirs() {
+    remove_own_work_dirs_in(&work_root());
+}
+
+fn remove_own_work_dirs_in(root: &Path) {
     let prefix = format!("{}-", std::process::id());
-    remove_work_dirs(&work_root(), |name, _| name.starts_with(&prefix));
+    remove_work_dirs(root, |name, _| name.starts_with(&prefix));
 }
 
 /// Remove working copies left by earlier sessions that didn't quit cleanly
 /// (crash, kill): folders untouched for longer than `max_age`. A running
 /// instance writes to its folder on every edit, so recent ones are kept.
 pub fn remove_stale_work_dirs(max_age: std::time::Duration) {
-    remove_work_dirs(&work_root(), |_, age| age.is_some_and(|a| a > max_age));
+    remove_stale_work_dirs_in(&work_root(), max_age);
+}
+
+fn remove_stale_work_dirs_in(root: &Path, max_age: std::time::Duration) {
+    remove_work_dirs(root, |_, age| age.is_some_and(|a| a > max_age));
 }
 
 fn remove_work_dirs(root: &Path, remove: impl Fn(&str, Option<std::time::Duration>) -> bool) {
@@ -1147,21 +1155,23 @@ mod tests {
 
     #[test]
     fn work_dirs_are_per_session_and_removed_on_quit() {
-        let a = new_work_dir();
-        let b = new_work_dir();
-        assert_ne!(a, b);
+        assert_ne!(new_work_dir(), new_work_dir());
+        // Its own root: tests share a process, and the others' working
+        // folders in the real one would count as "own".
+        let root = std::env::temp_dir().join(format!("vimpdf-roots-{}", std::process::id()));
+        let own = |n: u32| root.join(format!("{}-{n}", std::process::id()));
+        let (a, b) = (own(0), own(1));
         std::fs::create_dir_all(&a).unwrap();
         std::fs::create_dir_all(&b).unwrap();
         // A fresh folder from another process is kept by the stale sweep.
-        let other = work_root().join("1-0");
+        let other = root.join("1-0");
         std::fs::create_dir_all(&other).unwrap();
-        remove_stale_work_dirs(std::time::Duration::from_secs(3600));
+        remove_stale_work_dirs_in(&root, std::time::Duration::from_secs(3600));
         assert!(a.exists() && other.exists());
-        remove_own_work_dirs();
+        remove_own_work_dirs_in(&root);
         assert!(!a.exists() && !b.exists());
         assert!(other.exists(), "other processes' folders are left alone");
-        std::fs::remove_dir_all(&other).unwrap();
-        let _ = std::fs::remove_dir(work_root());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// Print the annotations of the PDF named by `VIMPDF_ANNOT_DUMP`.
