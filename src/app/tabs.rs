@@ -200,6 +200,7 @@ impl VimpdfApp {
     /// Reset what doesn't carry over to another document.
     fn tab_switched(&mut self, ctx: &egui::Context) {
         self.keys.reset();
+        self.link_preview.close();
         self.show_props = false;
         if !matches!(self.mode, Mode::Normal | Mode::Command | Mode::Menu) {
             self.mode = Mode::Normal;

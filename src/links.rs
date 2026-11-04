@@ -92,6 +92,8 @@ pub fn hint_labels(n: usize) -> Vec<String> {
 pub enum HintAction {
     Follow,
     CopyAddress,
+    /// Show where an internal link leads, in the popup.
+    Preview,
 }
 
 /// Open an external link in the default handler. Only web and mail links are

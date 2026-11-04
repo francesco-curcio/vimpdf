@@ -329,6 +329,7 @@ impl Keymap {
             ("n", SearchNext(1)),
             ("f", Hints(crate::links::HintAction::Follow)),
             ("yf", Hints(crate::links::HintAction::CopyAddress)),
+            ("gp", Hints(crate::links::HintAction::Preview)),
             ("<C-o>", JumpBack(1)),
             ("<C-i>", JumpForward(1)),
             ("m", AwaitMark { set: true }),
@@ -634,6 +635,7 @@ mod tests {
         );
         km.unbind(&parse_sequence("gv").unwrap());
         km.unbind(&parse_sequence("gm").unwrap());
+        km.unbind(&parse_sequence("gp").unwrap());
         km.unbind(&parse_sequence("gt").unwrap());
         km.unbind(&parse_sequence("gT").unwrap());
         let mut st = KeyState::default();

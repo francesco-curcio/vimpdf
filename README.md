@@ -149,6 +149,7 @@ Press `?` in the viewer for the list of the bindings that are actually active
 | `/` | Search (Enter runs it; an empty search repeats the last one) |
 | `n` / `N` | Next / previous match (wraps; `3n` skips ahead) |
 | `f` | Link hints: a label appears on every link on screen; type it to follow the link |
+| `gp` | Preview a link: pick an internal link by its label to see where it leads, in a popup. Your scroll keys scroll it, `<Tab>`/`<S-Tab>` pick a link inside it, Enter follows that link (or, with none picked, jumps to the destination), `Esc` closes |
 | `yf` | Link hints, but copy the link's address instead of following it |
 | `<C-o>` / `<C-i>` | Back / forward through the jump history |
 | `m<letter>` / `'<letter>` | Set a mark / jump to it (`` ` `` works like `'`) |
@@ -201,7 +202,10 @@ two idle seconds (`mouse.hide_after`) and comes back when the mouse moves.
 Internal links jump to the exact destination (a citation lands on the
 reference, with a little context above it). Resting the pointer on one shows
 where it leads in a popup, without jumping: the reference entry, the figure,
-the equation (`mouse.link_preview = false` turns this off). External links open in the
+the equation (`mouse.link_preview = false` turns this off). Move the pointer
+onto the popup and it stays: the wheel scrolls it, across pages, and its links
+work, so a reference's own link can be clicked right there (`gp` does all this
+from the keyboard). External links open in the
 default browser — only `http(s)` and `mailto` links, so a PDF can't use a link
 to launch local files or applications.
 

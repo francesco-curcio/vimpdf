@@ -172,7 +172,7 @@ These names are used in `[keys.*]` and can also be typed after `:`.
 | `search_prompt [text]` | `/` |
 | `search <text>` | — (`:search foo` searches without opening the prompt) |
 | `search_next [n]`, `search_prev [n]` | `n`, `N` |
-| `hints`, `hints_copy` | `f`, `yf` |
+| `hints`, `hints_copy`, `hints_preview` | `f`, `yf`, `gp` |
 | `visual`, `visual_line` | `v`, `V` (also in visual mode: switch or leave) |
 | `toggle_annotations` | `<C-a>` |
 | `undo` | `u` (normal and visual mode) |

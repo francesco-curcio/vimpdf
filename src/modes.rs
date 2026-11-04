@@ -21,6 +21,8 @@ pub enum Mode {
     Place,
     /// A menu of the menu bar is open.
     Menu,
+    /// The link preview popup has the keyboard (`gp`).
+    LinkPreview,
 }
 
 impl Mode {
@@ -36,6 +38,7 @@ impl Mode {
             Mode::Comment => "COMMENT",
             Mode::Place => "PLACE",
             Mode::Menu => "MENU",
+            Mode::LinkPreview => "PREVIEW",
         }
     }
 }

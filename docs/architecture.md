@@ -172,6 +172,16 @@ page + offset positions. Every jump command records the position first.
 - `watch.rs` watches the file's directory with `notify` (tools often replace
   files by renaming); the app reloads 300 ms after the last change.
 
+## Link preview
+
+`app/preview.rs` shows a popup on where an internal link leads, from a resting
+pointer or from `gp` (`Mode::LinkPreview`, keys in `preview_key`). The popup is
+a small viewport on the document: it keeps a document position and draws whole
+pages, rendered one at a time by `render/preview.rs`, clipped to its rectangle.
+So it scrolls across pages without waiting for a render within a page, and a
+point in it maps back to a page for `PageLink` lookups. A mouse popup closes
+shortly after the pointer leaves both the link and the popup.
+
 ## macOS integration
 
 `main.rs` creates the winit event loop itself (`eframe::create_native` +

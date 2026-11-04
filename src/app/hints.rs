@@ -54,13 +54,17 @@ impl VimpdfApp {
         for page in layout.pages_in(vp.y, vp.y + vp.doc_height()) {
             let r = layout.page(page);
             for link in self.view.links.get(page).into_iter().flatten() {
-                if in_view(
-                    vp,
-                    r.x + link.x0,
-                    r.y + link.y0,
-                    r.x + link.x1,
-                    r.y + link.y1,
-                ) {
+                let wanted = action != HintAction::Preview
+                    || matches!(link.target, LinkTarget::Internal { .. });
+                if wanted
+                    && in_view(
+                        vp,
+                        r.x + link.x0,
+                        r.y + link.y0,
+                        r.x + link.x1,
+                        r.y + link.y1,
+                    )
+                {
                     found.push((page, link.x0, link.y0, Target::Link(link.target.clone())));
                 }
             }
@@ -210,6 +214,10 @@ impl VimpdfApp {
     ) -> Option<Command> {
         match (purpose, target) {
             (Purpose::Link(HintAction::Follow), Target::Link(t)) => Some(Command::FollowLink(t)),
+            (Purpose::Link(HintAction::Preview), Target::Link(t)) => {
+                self.preview_link(ctx, t);
+                None
+            }
             (Purpose::Link(HintAction::CopyAddress), Target::Link(t)) => {
                 let text = match &t {
                     LinkTarget::External(uri) => uri.clone(),

@@ -24,7 +24,10 @@ const MOUSE: &[(&str, &str)] = &[
         "edit it (<C-a> e)",
     ),
     ("drag a note or text box", "move it (<C-a> m)"),
-    ("rest the pointer on a link", "preview where it leads"),
+    (
+        "rest the pointer on a link",
+        "preview where it leads; scroll and click in it",
+    ),
     ("click page number in status bar", "go to page (:<n>)"),
     (
         "click a tab, × or middle click",

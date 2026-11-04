@@ -286,6 +286,7 @@ impl VimpdfApp {
             (page, vp.y - layout.page(page).y)
         });
         self.view = view;
+        self.link_preview.close();
         self.pending_scroll = Vec2::ZERO;
         self.selection = None;
         self.hints = None;
@@ -865,6 +866,13 @@ impl VimpdfApp {
                 .filter_map(|tok| self.annotations_key(tok))
                 .collect();
         }
+        if self.mode == Mode::LinkPreview {
+            let events = ctx.input(|i| i.events.clone());
+            return key_tokens(&events)
+                .iter()
+                .filter_map(|tok| self.preview_key(tok))
+                .collect();
+        }
         let visual = self.mode == Mode::Visual;
         if !(self.mode == Mode::Normal || visual) || ctx.text_edit_focused() {
             return Vec::new();
@@ -1146,7 +1154,10 @@ impl eframe::App for VimpdfApp {
         if let Some(thumb) = scrollbar_drag {
             self.draw_scrollbar_page(&painter, thumb, &vp);
         }
-        self.show_link_preview(&ctx, area, &vp);
+        let (preview_command, preview_cursor) = self.show_link_preview(&ctx, area, &vp);
+        if let Some(c) = preview_cursor {
+            cursor = c;
+        }
         let mut start_command = None;
         if self.start.is_some() {
             start_command = self.show_start_screen(ui, area);
@@ -1168,6 +1179,7 @@ impl eframe::App for VimpdfApp {
         let pages = self.view.page_count();
         let mut ui_commands = Vec::new();
         ui_commands.extend(start_command);
+        ui_commands.extend(preview_command);
         if let Some(rect) = tabbar_rect {
             let main = tabs::is_main_window();
             use ui::tabbar::TabAction;
