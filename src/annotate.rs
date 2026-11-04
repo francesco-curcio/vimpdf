@@ -397,8 +397,8 @@ pub struct RedactReport {
     pub notes_removed: usize,
     /// Outline titles replaced for quoting it.
     pub outline_titles: usize,
-    /// Fields of the document's properties that still quote it.
-    pub metadata: Vec<String>,
+    /// Document properties blanked for quoting it.
+    pub properties: Vec<String>,
 }
 
 /// What replaces an outline title that quotes redacted text.
@@ -407,8 +407,6 @@ const REDACTED_TITLE: &str = "[redacted]";
 const MIN_QUOTED_CHARS: usize = 3;
 /// Outline entries visited at most (a damaged outline can loop).
 const MAX_OUTLINE_ITEMS: usize = 100_000;
-/// The document's properties that can quote redacted text.
-const METADATA_FIELDS: [&str; 5] = ["Title", "Author", "Subject", "Keywords", "Creator"];
 
 /// The text under `rects`, without whitespace.
 fn text_under(text: &crate::text::PageText, rects: &[TextRect]) -> String {
@@ -526,18 +524,33 @@ fn replace_quoting_titles(doc: &PdfDocument, secrets: &BTreeSet<String>) -> Resu
     Ok(replaced)
 }
 
-/// The document properties that quote redacted text.
-fn quoting_metadata(doc: &PdfDocument, secrets: &BTreeSet<String>) -> Result<Vec<String>> {
-    let Some(info) = doc.trailer()?.get_dict("Info")? else {
-        return Ok(Vec::new());
-    };
-    let mut found = Vec::new();
-    for field in METADATA_FIELDS {
-        if dict_text(&info, field)?.is_some_and(|t| quotes(&t, secrets)) {
-            found.push(field.to_owned());
+/// Blank the document properties that quote redacted text, and their XML
+/// copy (XMP), which holds the same things; what was blanked.
+fn blank_quoting_properties(doc: &PdfDocument, secrets: &BTreeSet<String>) -> Result<Vec<String>> {
+    let mut blanked = Vec::new();
+    if let Some(mut info) = doc.trailer()?.get_dict("Info")? {
+        for i in 0..info.dict_len()? {
+            let Some(key) = info.get_dict_key(i as i32)? else {
+                continue;
+            };
+            let name = String::from_utf8_lossy(&key.as_name()?).into_owned();
+            if dict_text(&info, &name)?.is_some_and(|t| quotes(&t, secrets)) {
+                blanked.push(name);
+            }
+        }
+        for name in &blanked {
+            info.dict_delete(name.as_str())?;
         }
     }
-    Ok(found)
+    let mut catalog = doc.catalog()?;
+    if let Some(xmp) = catalog.get_dict("Metadata")?
+        && xmp.is_stream()?
+        && quotes(&String::from_utf8_lossy(&xmp.read_stream()?), secrets)
+    {
+        catalog.dict_delete("Metadata")?;
+        blanked.push("XMP".to_owned());
+    }
+    Ok(blanked)
 }
 
 /// Write a file through `write` (given a path next to `target`), then put it
@@ -1084,7 +1097,7 @@ impl EditorState {
         // The marks only cover pages: quotes elsewhere in the file go too.
         let notes_removed = remove_quoting_annotations(&copy, &secrets)?;
         let outline_titles = replace_quoting_titles(&copy, &secrets)?;
-        let metadata = quoting_metadata(&copy, &secrets)?;
+        let properties = blank_quoting_properties(&copy, &secrets)?;
         // A full rewrite with garbage collection: nothing removed may survive
         // in the file (an incremental save would keep the old content).
         let out_str = out.to_str().context("path is not UTF-8")?;
@@ -1115,7 +1128,7 @@ impl EditorState {
             leftover,
             notes_removed,
             outline_titles,
-            metadata,
+            properties,
         }))
     }
 
@@ -1299,10 +1312,10 @@ mod tests {
     }
 
     /// A one-page PDF with `ZEBRASECRET` on the page, quoted by a note, an
-    /// outline title (in UTF-16) and the document's title. mupdf rebuilds the
-    /// missing cross-reference table.
+    /// outline title (in UTF-16), the document's title and its XMP. mupdf
+    /// rebuilds the missing cross-reference table.
     const QUOTED_PDF: &str = "%PDF-1.4
-1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >> endobj
+1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 6 0 R /Metadata 11 0 R >> endobj
 2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj
 3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R
   /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>
@@ -1319,6 +1332,9 @@ endstream endobj
 9 0 obj << /Title (On ZEBRASECRET) /Author (Someone) >> endobj
 10 0 obj << /Type /Annot /Subtype /Text /Rect [500 600 520 620]
   /Contents (unrelated) >> endobj
+11 0 obj << /Type /Metadata /Subtype /XML /Length 26 >> stream
+<dc:title>ZEBRASECRET</dc>
+endstream endobj
 trailer << /Root 1 0 R /Info 9 0 R >>
 ";
 
@@ -1352,7 +1368,7 @@ trailer << /Root 1 0 R /Info 9 0 R >>
         };
         assert_eq!(report.notes_removed, 1);
         assert_eq!(report.outline_titles, 1);
-        assert_eq!(report.metadata, ["Title"]);
+        assert_eq!(report.properties, ["Title", "XMP"]);
 
         let red = PdfDocument::open(out.to_str().unwrap()).unwrap();
         let page = red.load_pdf_page(0).unwrap();
@@ -1368,6 +1384,20 @@ trailer << /Root 1 0 R /Info 9 0 R >>
             .map(|o| o.title)
             .collect();
         assert_eq!(titles, ["Introduction", REDACTED_TITLE]);
+        let info = red.trailer().unwrap().get_dict("Info").unwrap().unwrap();
+        assert_eq!(dict_text(&info, "Title").unwrap(), None);
+        assert_eq!(
+            dict_text(&info, "Author").unwrap().as_deref(),
+            Some("Someone"),
+            "the other property stays"
+        );
+        assert!(
+            red.catalog()
+                .unwrap()
+                .get_dict("Metadata")
+                .unwrap()
+                .is_none()
+        );
 
         st.cleanup();
         std::fs::remove_dir_all(&dir).unwrap();

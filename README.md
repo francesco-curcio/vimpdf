@@ -457,7 +457,9 @@ file: it always writes a new one.
    covered are removed, and a black box is drawn. Marked text is then looked
    for in the rest of the file (ignoring case and spaces; marks under three
    characters are skipped): notes and other annotations quoting it are removed,
-   and outline titles quoting it become `[redacted]`. The file is rewritten
+   outline titles quoting it become `[redacted]`, and document properties
+   quoting it (title, author, keywords…, and their XMP copy) are blanked. The
+   file is rewritten
    from scratch with garbage collection, so nothing removed survives inside it.
 3. vimpdf then re-reads the written file and checks that no text is left under
    any mark, reports the result, and opens the redacted file (if your only
@@ -466,9 +468,9 @@ file: it always writes a new one.
 **Check before sharing.** Search-based marking only finds real text. Text that
 is part of a figure (labels drawn as shapes, or inside an image) and scanned
 pages are invisible to search: look through the document and cover them with
-area marks (`X`). Document metadata (title, author, keywords in the file's
-properties) is not changed, but vimpdf warns if it quotes the marked text.
-Form fields and attached files aren't looked at.
+area marks (`X`). Properties and notes that mention the content without
+quoting a mark word for word stay. Form fields and attached files aren't
+looked at.
 
 ### Reading comfort
 

@@ -133,7 +133,6 @@ impl VimpdfApp {
             ));
         }
         let summary = redaction_summary(&report);
-        let warn = !report.metadata.is_empty();
         if self.annots.unsaved_other {
             // Opening the result would lose the other unsaved changes.
             self.info(format!(
@@ -143,24 +142,14 @@ impl VimpdfApp {
             // Only redaction marks were unsaved: switch to the redacted file.
             self.annots.unsaved = false;
             self.open(ctx, report.path, false);
-            self.info(summary.clone());
-        }
-        if warn {
-            self.error(summary);
+            self.info(summary);
         }
     }
 }
 
-/// What `:redact` tells: first what still needs a look, as a long message
-/// gets cut off in the status bar.
+/// What `:redact` tells: what it did to the marks, and what else it removed.
 fn redaction_summary(r: &RedactReport) -> String {
     let mut parts = Vec::new();
-    if !r.metadata.is_empty() {
-        parts.push(format!(
-            "Don't share it yet: the document's properties still quote the text ({}).",
-            r.metadata.join(", ")
-        ));
-    }
     let name = r.path.file_name().unwrap_or(r.path.as_os_str());
     parts.push(format!(
         "Redacted {} mark(s) on {} page(s) into {}, verified: no text left under the marks.",
@@ -176,6 +165,9 @@ fn redaction_summary(r: &RedactReport) -> String {
             "Replaced {} quoting outline title(s).",
             r.outline_titles
         ));
+    }
+    if !r.properties.is_empty() {
+        parts.push(format!("Blanked {}.", r.properties.join(", ")));
     }
     parts.join(" ")
 }
@@ -207,7 +199,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_summary_says_what_else_went_and_what_stayed() {
+    fn the_summary_says_what_else_went() {
         let mut report = RedactReport {
             path: "/a/long/way/a.pdf".into(),
             marks: 2,
@@ -215,17 +207,16 @@ mod tests {
             leftover: Vec::new(),
             notes_removed: 0,
             outline_titles: 0,
-            metadata: Vec::new(),
+            properties: Vec::new(),
         };
         assert!(!redaction_summary(&report).contains("Removed"));
         report.notes_removed = 1;
         report.outline_titles = 2;
-        report.metadata = vec!["Title".into()];
+        report.properties = vec!["Title".into()];
         let text = redaction_summary(&report);
         assert!(text.contains("Removed 1 quoting note"), "{text}");
         assert!(text.contains("Replaced 2 quoting outline"), "{text}");
-        assert!(text.starts_with("Don't share it yet"), "{text}");
-        assert!(text.contains("(Title)"), "{text}");
+        assert!(text.contains("Blanked Title."), "{text}");
         assert!(text.contains(" into a.pdf,"), "{text}");
     }
 
