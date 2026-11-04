@@ -97,7 +97,8 @@ pub struct VimpdfApp {
     show_props: bool,
     settings: Option<ui::settings::SettingsWindow>,
     /// The tab to show once the last session's tabs are open.
-    restore_active: Option<PathBuf>,
+    /// The last session's tabs and the active one, until the first frame.
+    restored: Option<(Vec<PathBuf>, Option<PathBuf>)>,
     /// An image to put on the clipboard (`Y`), sent at the end of the frame.
     clipboard_image: Option<egui::ColorImage>,
     link_preview: preview::LinkPreview,
@@ -172,7 +173,7 @@ impl VimpdfApp {
             },
             show_props: false,
             settings: None,
-            restore_active: None,
+            restored: None,
             clipboard_image: None,
             link_preview: Default::default(),
             confirm: None,
@@ -193,10 +194,7 @@ impl VimpdfApp {
     /// Open `tabs` (the last session's) once the window is up, then show
     /// `active`.
     pub fn with_restored_tabs(mut self, tabs: Vec<PathBuf>, active: Option<PathBuf>) -> Self {
-        if !tabs.is_empty() {
-            crate::platform::push_opened(tabs);
-            self.restore_active = active;
-        }
+        self.restored = Some((tabs, active));
         self
     }
 
@@ -455,7 +453,12 @@ impl VimpdfApp {
         let step = self.config.scroll_step;
         let (screen, zoom_step) = match &self.viewport {
             Some(vp) => (vp.height, self.config.zoom_step),
-            None => return,
+            None => {
+                // Nothing runs before the next frame lays out the document:
+                // whoever sends several commands in a row has to wait for it.
+                tracing::warn!(?cmd, "command dropped: no viewport yet");
+                return;
+            }
         };
         if self.mode == Mode::Visual {
             let dy = match cmd {
@@ -743,6 +746,10 @@ impl VimpdfApp {
     /// Files opened from outside (Finder, Dock, browser), dropped on the
     /// window or restored from the last session each get a tab.
     fn open_external_files(&mut self, ctx: &egui::Context) {
+        self.restore_session_tabs(ctx);
+        if self.viewport.is_none() {
+            return; // files wait for the next frame, as commands need one
+        }
         let mut paths = crate::platform::take_opened();
         paths.extend(ctx.input(|i| {
             i.raw
@@ -764,12 +771,7 @@ impl VimpdfApp {
                 break;
             }
         }
-        let rest: Vec<_> = paths.collect();
-        if rest.is_empty() {
-            self.show_restored_tab(ctx);
-        } else {
-            crate::platform::push_opened(rest);
-        }
+        crate::platform::push_opened(paths);
         ctx.send_viewport_cmd(ViewportCommand::Focus);
         crate::platform::activate();
     }

@@ -4,7 +4,9 @@
 //! code works on "the document" without knowing about tabs. The other tabs
 //! are parked here and swapped in when switched to. Their threads (render,
 //! search, annotation editor) keep running; what they send waits in their
-//! channels until the tab is active again.
+//! channels until the tab is active again. Tabs restored from the last
+//! session open only when first shown, so a long session starts quickly and
+//! costs no threads for what isn't read.
 
 use super::*;
 use crate::ui::tabbar::TabLabel;
@@ -64,20 +66,60 @@ fn tab_name(view: &DocView) -> String {
     }
 }
 
+/// A place in the row of tabs.
+pub(super) enum Slot {
+    /// The active tab: its state is in the app's fields.
+    Active,
+    Parked(Box<Tab>),
+    /// From the last session, not opened yet.
+    Unopened(PathBuf),
+}
+
 pub(super) struct Tabs {
-    /// One slot per tab, in order. The active tab's slot is empty: its state
-    /// is in the app's fields.
-    parked: Vec<Option<Tab>>,
+    /// One slot per tab, in order.
+    slots: Vec<Slot>,
     active: usize,
 }
 
 impl Default for Tabs {
     fn default() -> Self {
         Self {
-            parked: vec![None],
+            slots: vec![Slot::Active],
             active: 0,
         }
     }
+}
+
+impl Tabs {
+    /// The parked tab in slot `i`, leaving the slot marked active.
+    fn take_parked(&mut self, i: usize) -> Option<Box<Tab>> {
+        if !matches!(self.slots[i], Slot::Parked(_)) {
+            return None;
+        }
+        match std::mem::replace(&mut self.slots[i], Slot::Active) {
+            Slot::Parked(tab) => Some(tab),
+            _ => None,
+        }
+    }
+}
+
+/// The slots of a session's `tabs` whose tab `shown` takes the active tab.
+fn restored_slots(tabs: Vec<PathBuf>, shown: usize) -> Vec<Slot> {
+    tabs.into_iter()
+        .enumerate()
+        .map(|(i, path)| {
+            if i == shown {
+                Slot::Active
+            } else {
+                Slot::Unopened(path)
+            }
+        })
+        .collect()
+}
+
+fn unopened_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
 }
 
 impl VimpdfApp {
@@ -102,24 +144,29 @@ impl VimpdfApp {
 
     /// Run `f` with each parked tab swapped in, then put things back.
     fn for_each_parked(&mut self, mut f: impl FnMut(&mut Self)) {
-        for i in 0..self.tabs.parked.len() {
-            let Some(mut tab) = self.tabs.parked[i].take() else {
+        for i in 0..self.tabs.slots.len() {
+            let Some(mut tab) = self.tabs.take_parked(i) else {
                 continue;
             };
             self.swap_tab(&mut tab);
             f(self);
             self.swap_tab(&mut tab);
-            self.tabs.parked[i] = Some(tab);
+            self.tabs.slots[i] = Slot::Parked(tab);
         }
     }
 
     pub(super) fn tab_labels(&self) -> Vec<TabLabel> {
         self.tabs
-            .parked
+            .slots
             .iter()
             .map(|slot| match slot {
-                Some(tab) => tab.label(),
-                None => TabLabel {
+                Slot::Parked(tab) => tab.label(),
+                Slot::Unopened(path) => TabLabel {
+                    name: unopened_name(path),
+                    unsaved: false,
+                    active: false,
+                },
+                Slot::Active => TabLabel {
                     name: tab_name(&self.view),
                     unsaved: self.annots.unsaved,
                     active: true,
@@ -129,7 +176,30 @@ impl VimpdfApp {
     }
 
     pub(super) fn tab_count(&self) -> usize {
-        self.tabs.parked.len()
+        self.tabs.slots.len()
+    }
+
+    /// The state of tab `i`, opening it if it hasn't been yet. One that can't
+    /// be opened any more goes away, with a message.
+    fn load_tab(&mut self, ctx: &egui::Context, i: usize) -> Option<Box<Tab>> {
+        let Slot::Unopened(path) = &self.tabs.slots[i] else {
+            return self.tabs.take_parked(i);
+        };
+        match DocView::open(ctx, path, self.config.author_name()) {
+            Ok(view) => {
+                self.tabs.slots[i] = Slot::Active;
+                Some(Box::new(Tab::new(view)))
+            }
+            Err(e) => {
+                self.error(format!("{e:#}"));
+                self.tabs.slots.remove(i);
+                if i < self.tabs.active {
+                    self.tabs.active -= 1;
+                }
+                self.save_session();
+                None
+            }
+        }
     }
 
     /// Switch to tab `i` (0-based).
@@ -138,9 +208,11 @@ impl VimpdfApp {
             return;
         }
         self.save_state();
-        let mut tab = self.tabs.parked[i].take().expect("parked tab");
+        let Some(mut tab) = self.load_tab(ctx, i) else {
+            return;
+        };
         self.swap_tab(&mut tab);
-        self.tabs.parked[self.tabs.active] = Some(tab);
+        self.tabs.slots[self.tabs.active] = Slot::Parked(tab);
         self.tabs.active = i;
         self.tab_switched(ctx);
     }
@@ -170,8 +242,12 @@ impl VimpdfApp {
             return;
         }
         let mut session = crate::state::Session::default();
-        for (i, slot) in self.tabs.parked.iter().enumerate() {
-            let path = slot.as_ref().map_or(&self.view.path, |t| &t.view.path);
+        for (i, slot) in self.tabs.slots.iter().enumerate() {
+            let path = match slot {
+                Slot::Active => &self.view.path,
+                Slot::Parked(tab) => &tab.view.path,
+                Slot::Unopened(path) => path,
+            };
             if crate::welcome::is_welcome(path) {
                 continue;
             }
@@ -187,14 +263,26 @@ impl VimpdfApp {
         }
     }
 
-    /// After the tabs of the last session were queued for opening: show the
-    /// one that was active.
-    pub(super) fn show_restored_tab(&mut self, ctx: &egui::Context) {
-        if let Some(path) = self.restore_active.take()
-            && let Some(i) = self.tab_with_path(&path)
-        {
-            self.switch_tab(ctx, i);
+    /// Put the last session's tabs in the row. On the start page the tab
+    /// that was active replaces it; otherwise they go after the file vimpdf
+    /// was launched with. Either way the rest open when first shown.
+    pub(super) fn restore_session_tabs(&mut self, ctx: &egui::Context) {
+        let Some((tabs, active)) = self.restored.take().filter(|(tabs, _)| !tabs.is_empty()) else {
+            return;
+        };
+        if !self.on_start_page() {
+            self.tabs.slots.extend(tabs.into_iter().map(Slot::Unopened));
+            return self.save_session();
         }
+        let shown = active
+            .and_then(|a| tabs.iter().position(|t| *t == a))
+            .unwrap_or(0);
+        let path = tabs[shown].clone();
+        self.tabs.slots = restored_slots(tabs, shown);
+        self.tabs.active = shown;
+        self.open(ctx, path, false);
+        self.save_session();
+        ctx.request_repaint();
     }
 
     /// Reset what doesn't carry over to another document.
@@ -213,9 +301,10 @@ impl VimpdfApp {
     }
 
     fn tab_with_path(&self, path: &std::path::Path) -> Option<usize> {
-        self.tabs.parked.iter().position(|slot| match slot {
-            Some(tab) => tab.view.path == path,
-            None => self.view.path == path,
+        self.tabs.slots.iter().position(|slot| match slot {
+            Slot::Active => self.view.path == path,
+            Slot::Parked(tab) => tab.view.path == path,
+            Slot::Unopened(p) => p == path,
         })
     }
 
@@ -264,7 +353,8 @@ impl VimpdfApp {
 
     fn add_tab(&mut self, ctx: &egui::Context, view: DocView) {
         let at = self.tabs.active + 1;
-        self.tabs.parked.insert(at, Some(Tab::new(view)));
+        let tab = Slot::Parked(Box::new(Tab::new(view)));
+        self.tabs.slots.insert(at, tab);
         self.switch_tab(ctx, at);
     }
 
@@ -281,11 +371,13 @@ impl VimpdfApp {
         } else {
             closing - 1
         };
-        let mut tab = self.tabs.parked[next].take().expect("parked tab");
+        let Some(mut tab) = self.load_tab(ctx, next) else {
+            return self.close_tab(ctx); // that one is gone: look again
+        };
         self.swap_tab(&mut tab);
         // `tab` now holds the closed document; dropping it stops its threads.
         drop(tab);
-        self.tabs.parked.remove(closing);
+        self.tabs.slots.remove(closing);
         self.tabs.active = if next > closing { next - 1 } else { next };
         self.tab_switched(ctx);
     }
@@ -354,9 +446,9 @@ impl VimpdfApp {
             return Some(self.tabs.active);
         }
         self.tabs
-            .parked
+            .slots
             .iter()
-            .position(|slot| slot.as_ref().is_some_and(|t| t.annots.unsaved))
+            .position(|slot| matches!(slot, Slot::Parked(t) if t.annots.unsaved))
     }
 
     /// `:qa`: quit unless a tab has unsaved annotations (then show it).
@@ -423,5 +515,19 @@ fn own_executable() -> std::io::Result<PathBuf> {
     match name.strip_suffix(" (deleted)") {
         Some(path) => Ok(PathBuf::from(path)),
         None => Ok(exe),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_restored_session_opens_only_the_tab_shown() {
+        let tabs = vec!["a.pdf".into(), "b.pdf".into(), "c.pdf".into()];
+        let slots = restored_slots(tabs, 1);
+        assert!(matches!(&slots[0], Slot::Unopened(p) if p.ends_with("a.pdf")));
+        assert!(matches!(slots[1], Slot::Active));
+        assert!(matches!(&slots[2], Slot::Unopened(p) if p.ends_with("c.pdf")));
     }
 }
