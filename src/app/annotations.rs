@@ -300,8 +300,18 @@ impl VimpdfApp {
         }
     }
 
-    /// `:w`: refuses to save into a temporary copy (a browser may delete it).
+    /// `:w`: refuses to save into a temporary copy (a browser may delete it)
+    /// or over another file. Its own path is plain `:w`.
     pub(super) fn write(&mut self, path: Option<PathBuf>) {
+        let path = path
+            .map(|p| self.resolve(p))
+            .filter(|p| std::fs::canonicalize(p).map_or(true, |p| p != self.view.path));
+        if let Some(p) = path.as_ref().filter(|p| p.exists()) {
+            return self.error(format!(
+                "{} already exists; :w! <path> replaces it",
+                p.display()
+            ));
+        }
         if path.is_none() && self.annots.unsaved && crate::platform::is_temporary(&self.view.path) {
             return self.error(
                 "This PDF is a temporary copy (e.g. opened from a browser) and may be deleted: \
@@ -465,12 +475,7 @@ impl VimpdfApp {
                         self.warn_unapplied_redactions("Saved a copy");
                     }
                 }
-                EditEvent::Redacted {
-                    path,
-                    marks,
-                    pages,
-                    leftover,
-                } => self.redaction_done(ctx, path, marks, pages, leftover),
+                EditEvent::Redacted(report) => self.redaction_done(ctx, report),
                 EditEvent::Info(msg) => self.info(msg),
                 EditEvent::Error(msg) => {
                     self.annots.quit_after_save = false;

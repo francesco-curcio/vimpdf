@@ -21,9 +21,10 @@ impl VimpdfApp {
     /// True when the command was held.
     pub(super) fn ask_for_missing_folder(&mut self, cmd: &Command) -> bool {
         let target = match cmd {
-            Command::SaveAs(p) | Command::Write(Some(p)) | Command::ApplyRedactions(Some(p)) => {
-                self.resolve(p.clone())
-            }
+            Command::SaveAs(p)
+            | Command::Write(Some(p))
+            | Command::WriteOver(p)
+            | Command::ApplyRedactions(Some(p)) => self.resolve(p.clone()),
             _ => return false,
         };
         let Some(folder) = target.parent().filter(|f| !f.as_os_str().is_empty()) else {

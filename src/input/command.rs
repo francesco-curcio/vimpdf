@@ -134,6 +134,8 @@ pub enum Command {
     WriteQuit,
     /// `:w!`: save into the file even if it's a temporary copy.
     WriteForce,
+    /// `:w! <path>`: save a copy, replacing the file if it exists.
+    WriteOver(PathBuf),
     /// `:saveas <path>`: save a copy with the annotations and switch to it.
     SaveAs(PathBuf),
     /// Open the other copy of this document that has annotations.
@@ -544,7 +546,8 @@ pub fn parse_ex(line: &str) -> Result<Option<Command>, String> {
         "attach" => Command::AttachTab,
         "tabe" | "tabedit" | "tabnew" | "tabopen" if rest.is_empty() => Command::NewTab,
         "tabe" | "tabedit" | "tabnew" | "tabopen" => Command::Open(expand_tilde(rest)),
-        "w!" | "write!" => Command::WriteForce,
+        "w!" | "write!" if rest.is_empty() => Command::WriteForce,
+        "w!" | "write!" => Command::WriteOver(expand_tilde(rest)),
         "sav" | "saveas" if rest.is_empty() => return Err(":saveas needs a file path".into()),
         "sav" | "saveas" => Command::SaveAs(expand_tilde(rest)),
         "annotated" => Command::OpenAnnotatedCopy,
@@ -711,6 +714,10 @@ mod tests {
         );
         assert_eq!(parse_ex("wq"), Ok(Some(Command::WriteQuit)));
         assert_eq!(parse_ex("w!"), Ok(Some(Command::WriteForce)));
+        assert_eq!(
+            parse_ex("w! b.pdf"),
+            Ok(Some(Command::WriteOver("b.pdf".into())))
+        );
         assert_eq!(
             parse_ex("saveas ~/x.pdf").map(|c| matches!(c, Some(Command::SaveAs(_)))),
             Ok(true)

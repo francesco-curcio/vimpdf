@@ -7,7 +7,7 @@
 //! original. `:w` saves into the original (incrementally: the original bytes
 //! are kept and the changes appended).
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::thread;
 
@@ -15,7 +15,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use crossbeam_channel::{Receiver, Sender};
 use mupdf::color::AnnotationColor;
 use mupdf::pdf::{
-    AnnotationQuadPoints, PdfAnnotation, PdfAnnotationType, PdfDocument, PdfPage, PdfWriteOptions,
+    AnnotationQuadPoints, PdfAnnotation, PdfAnnotationType, PdfDocument, PdfObject, PdfPage,
+    PdfWriteOptions,
 };
 use mupdf::{Point, Quad, Rect};
 
@@ -180,15 +181,8 @@ pub enum EditEvent {
         /// Unsaved changes other than redaction marks.
         unsaved_other: bool,
     },
-    /// Redactions applied and written to `path`; `leftover` lists marks under
-    /// which text was still found when the written file was re-read (empty
-    /// when the check passed).
-    Redacted {
-        path: PathBuf,
-        marks: usize,
-        pages: usize,
-        leftover: Vec<String>,
-    },
+    /// Redactions applied and written.
+    Redacted(RedactReport),
     Saved {
         path: PathBuf,
         original: bool,
@@ -388,6 +382,180 @@ fn kind_of(t: PdfAnnotationType) -> Option<AnnotKind> {
         PdfAnnotationType::Link | PdfAnnotationType::Popup | PdfAnnotationType::Widget => None,
         _ => Some(AnnotKind::Other),
     }
+}
+
+/// What `:redact` wrote and found.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RedactReport {
+    pub path: PathBuf,
+    pub marks: usize,
+    pub pages: usize,
+    /// Marks under which text was still found when the written file was
+    /// re-read (empty when the check passed).
+    pub leftover: Vec<String>,
+    /// Notes and other annotations removed for quoting redacted text.
+    pub notes_removed: usize,
+    /// Outline titles replaced for quoting it.
+    pub outline_titles: usize,
+    /// Fields of the document's properties that still quote it.
+    pub metadata: Vec<String>,
+}
+
+/// What replaces an outline title that quotes redacted text.
+const REDACTED_TITLE: &str = "[redacted]";
+/// Shorter marks aren't looked for elsewhere: they'd match unrelated text.
+const MIN_QUOTED_CHARS: usize = 3;
+/// Outline entries visited at most (a damaged outline can loop).
+const MAX_OUTLINE_ITEMS: usize = 100_000;
+/// The document's properties that can quote redacted text.
+const METADATA_FIELDS: [&str; 5] = ["Title", "Author", "Subject", "Keywords", "Creator"];
+
+/// The text under `rects`, without whitespace.
+fn text_under(text: &crate::text::PageText, rects: &[TextRect]) -> String {
+    text.chars
+        .iter()
+        .filter(|c| !c.c.is_whitespace())
+        .filter(|c| {
+            let (cx, cy) = ((c.x0 + c.x1) / 2.0, (c.y0 + c.y1) / 2.0);
+            rects
+                .iter()
+                .any(|r| cx > r.x0 && cx < r.x1 && cy > r.y0 && cy < r.y1)
+        })
+        .map(|c| c.c)
+        .collect()
+}
+
+/// `text` as compared with redacted text: whitespace and case don't count,
+/// as a name can wrap across lines or be capitalised differently.
+fn squeeze(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// What to look for elsewhere in the file: the text of each mark, whole and
+/// line by line, squeezed.
+fn marked_strings(
+    doc: &mupdf::Document,
+    marks: &[(usize, Vec<TextRect>)],
+) -> Result<BTreeSet<String>> {
+    let mut found = BTreeSet::new();
+    for (page, rects) in marks {
+        let text = crate::document::page_text(doc, *page)?;
+        found.insert(squeeze(&text_under(&text, rects)));
+        for rect in rects {
+            found.insert(squeeze(&text_under(&text, std::slice::from_ref(rect))));
+        }
+    }
+    found.retain(|s| s.chars().count() >= MIN_QUOTED_CHARS);
+    Ok(found)
+}
+
+fn quotes(text: &str, secrets: &BTreeSet<String>) -> bool {
+    let text = squeeze(text);
+    secrets.iter().any(|s| text.contains(s.as_str()))
+}
+
+/// A PDF string as text: UTF-16 or UTF-8 with a byte order mark, else
+/// PDFDocEncoding, which matches Latin-1 for what can be compared here.
+fn decode_pdf_string(bytes: &[u8]) -> String {
+    let utf16 = |unit: fn([u8; 2]) -> u16, bytes: &[u8]| {
+        let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| unit(*c)).collect();
+        String::from_utf16_lossy(&units)
+    };
+    match bytes {
+        [0xFE, 0xFF, rest @ ..] => utf16(u16::from_be_bytes, rest),
+        [0xFF, 0xFE, rest @ ..] => utf16(u16::from_le_bytes, rest),
+        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
+        _ => bytes.iter().map(|b| *b as char).collect(),
+    }
+}
+
+/// The string under `key` of a dictionary.
+fn dict_text(dict: &PdfObject, key: &str) -> Result<Option<String>> {
+    let Some(value) = dict.get_dict(key)? else {
+        return Ok(None);
+    };
+    if !value.is_string()? {
+        return Ok(None);
+    }
+    Ok(Some(decode_pdf_string(&value.as_bytes()?)))
+}
+
+/// Remove the annotations that quote redacted text; the count.
+fn remove_quoting_annotations(doc: &PdfDocument, secrets: &BTreeSet<String>) -> Result<usize> {
+    let mut removed = 0;
+    for page in 0..doc.page_count()? {
+        let mut p = doc.load_pdf_page(page)?;
+        let mut quoting = Vec::new();
+        for annot in p.annotations() {
+            let object = annot.object();
+            for key in ["Contents", "T", "Subj", "RC"] {
+                if dict_text(&object, key)?.is_some_and(|t| quotes(&t, secrets)) {
+                    quoting.push(annot);
+                    break;
+                }
+            }
+        }
+        removed += quoting.len();
+        for annot in quoting {
+            p.delete_annotation(annot)?;
+        }
+    }
+    Ok(removed)
+}
+
+/// Replace the outline titles that quote redacted text; the count. The
+/// entries stay, so the rest of the outline keeps its shape.
+fn replace_quoting_titles(doc: &PdfDocument, secrets: &BTreeSet<String>) -> Result<usize> {
+    let Some(outline) = doc.catalog()?.get_dict("Outlines")? else {
+        return Ok(0);
+    };
+    let mut replaced = 0;
+    let mut todo: Vec<PdfObject> = outline.get_dict("First")?.into_iter().collect();
+    for _ in 0..MAX_OUTLINE_ITEMS {
+        let Some(mut item) = todo.pop() else { break };
+        todo.extend(item.get_dict("Next")?);
+        todo.extend(item.get_dict("First")?);
+        if dict_text(&item, "Title")?.is_some_and(|t| quotes(&t, secrets)) {
+            item.dict_put("Title", doc.new_string(REDACTED_TITLE)?)?;
+            replaced += 1;
+        }
+    }
+    Ok(replaced)
+}
+
+/// The document properties that quote redacted text.
+fn quoting_metadata(doc: &PdfDocument, secrets: &BTreeSet<String>) -> Result<Vec<String>> {
+    let Some(info) = doc.trailer()?.get_dict("Info")? else {
+        return Ok(Vec::new());
+    };
+    let mut found = Vec::new();
+    for field in METADATA_FIELDS {
+        if dict_text(&info, field)?.is_some_and(|t| quotes(&t, secrets)) {
+            found.push(field.to_owned());
+        }
+    }
+    Ok(found)
+}
+
+/// Write a file through `write` (given a path next to `target`), then put it
+/// in `target`'s place in one step, so a failure leaves `target` as it was.
+fn replace_file(target: &Path, write: impl FnOnce(&str) -> Result<()>) -> Result<()> {
+    let tmp = target.with_extension("vimpdf-saving.pdf");
+    let tmp_str = tmp.to_str().context("path is not UTF-8")?;
+    let done = write(tmp_str).and_then(|()| {
+        if let Ok(meta) = std::fs::metadata(target) {
+            std::fs::set_permissions(&tmp, meta.permissions())?;
+        }
+        std::fs::rename(&tmp, target)
+            .with_context(|| format!("cannot replace {}", target.display()))
+    });
+    if done.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    done
 }
 
 impl EditorState {
@@ -838,14 +1006,11 @@ impl EditorState {
                         .save_with_options(target_str, opts)
                         .with_context(|| format!("cannot save {}", target.display()))?;
                 } else {
-                    // Write next to it, then replace it in one step.
-                    let tmp = target.with_extension("vimpdf-saving.pdf");
-                    let tmp_str = tmp.to_str().context("path is not UTF-8")?;
-                    self.doc
-                        .save_with_options(tmp_str, PdfWriteOptions::default())
-                        .with_context(|| format!("cannot write {}", tmp.display()))?;
-                    std::fs::rename(&tmp, &target)
-                        .with_context(|| format!("cannot replace {}", target.display()))?;
+                    replace_file(&target, |tmp| {
+                        self.doc
+                            .save_with_options(tmp, PdfWriteOptions::default())
+                            .with_context(|| format!("cannot write {}", target.display()))
+                    })?;
                 }
                 self.unsaved = false;
                 self.unsaved_other = false;
@@ -855,12 +1020,13 @@ impl EditorState {
                 })
             }
             Some(copy) => {
-                let copy_str = copy.to_str().context("path is not UTF-8")?;
                 let mut opts = PdfWriteOptions::default();
                 opts.set_garbage(true);
-                self.doc
-                    .save_with_options(copy_str, opts)
-                    .with_context(|| format!("cannot write {}", copy.display()))?;
+                replace_file(&copy, |tmp| {
+                    self.doc
+                        .save_with_options(tmp, opts)
+                        .with_context(|| format!("cannot write {}", copy.display()))
+                })?;
                 Ok(EditEvent::Saved {
                     path: copy,
                     original: false,
@@ -902,6 +1068,7 @@ impl EditorState {
         let src_str = src.to_str().context("temp path is not UTF-8")?;
         self.doc
             .save_with_options(src_str, PdfWriteOptions::default())?;
+        let secrets = marked_strings(&crate::document::open(&src)?, &marks)?;
         let copy = PdfDocument::open(src_str)?;
         let options = PdfRedactOptions {
             black_boxes: true,
@@ -914,6 +1081,10 @@ impl EditorState {
             p.redact_with_options(options)
                 .with_context(|| format!("cannot redact page {}", page + 1))?;
         }
+        // The marks only cover pages: quotes elsewhere in the file go too.
+        let notes_removed = remove_quoting_annotations(&copy, &secrets)?;
+        let outline_titles = replace_quoting_titles(&copy, &secrets)?;
+        let metadata = quoting_metadata(&copy, &secrets)?;
         // A full rewrite with garbage collection: nothing removed may survive
         // in the file (an incremental save would keep the old content).
         let out_str = out.to_str().context("path is not UTF-8")?;
@@ -932,28 +1103,20 @@ impl EditorState {
         let mut leftover = Vec::new();
         for (page, rects) in &marks {
             let text = crate::document::page_text(&check, *page)?;
-            let found: String = text
-                .chars
-                .iter()
-                .filter(|c| !c.c.is_whitespace())
-                .filter(|c| {
-                    let (cx, cy) = ((c.x0 + c.x1) / 2.0, (c.y0 + c.y1) / 2.0);
-                    rects
-                        .iter()
-                        .any(|r| cx > r.x0 && cx < r.x1 && cy > r.y0 && cy < r.y1)
-                })
-                .map(|c| c.c)
-                .collect();
+            let found = text_under(&text, rects);
             if !found.is_empty() {
                 leftover.push(format!("page {}: {found:?}", page + 1));
             }
         }
-        Ok(EditEvent::Redacted {
+        Ok(EditEvent::Redacted(RedactReport {
             path: out.to_owned(),
             marks: marks.len(),
             pages: pages.len(),
             leftover,
-        })
+            notes_removed,
+            outline_titles,
+            metadata,
+        }))
     }
 
     fn cleanup(&self) {
@@ -1135,6 +1298,120 @@ mod tests {
         assert!(text_box_height("a b c", 12.0, 10.0) > text_box_height("a b c", 12.0, 500.0));
     }
 
+    /// A one-page PDF with `ZEBRASECRET` on the page, quoted by a note, an
+    /// outline title (in UTF-16) and the document's title. mupdf rebuilds the
+    /// missing cross-reference table.
+    const QUOTED_PDF: &str = "%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >> endobj
+2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R
+  /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>
+  /Annots [5 0 R 10 0 R] >> endobj
+4 0 obj << /Length 55 >> stream
+BT /F1 18 Tf 72 700 Td (Public ZEBRASECRET words) Tj ET
+endstream endobj
+5 0 obj << /Type /Annot /Subtype /Text /Rect [500 700 520 720]
+  /Contents (about zebrasecret here) >> endobj
+6 0 obj << /Type /Outlines /Count 2 /First 7 0 R /Last 8 0 R >> endobj
+7 0 obj << /Title (Introduction) /Parent 6 0 R /Next 8 0 R >> endobj
+8 0 obj << /Title <FEFF005A00450042005200410053004500430052004500540020> /Parent 6 0 R
+  /Prev 7 0 R >> endobj
+9 0 obj << /Title (On ZEBRASECRET) /Author (Someone) >> endobj
+10 0 obj << /Type /Annot /Subtype /Text /Rect [500 600 520 620]
+  /Contents (unrelated) >> endobj
+trailer << /Root 1 0 R /Info 9 0 R >>
+";
+
+    #[test]
+    fn redaction_clears_quotes_of_the_text_elsewhere_in_the_file() {
+        let dir = std::env::temp_dir().join(format!("vimpdf-quotes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("doc.pdf");
+        std::fs::write(&src, QUOTED_PDF).unwrap();
+        let doc = crate::document::open(&src).unwrap();
+        let text = crate::document::page_text(&doc, 0).unwrap();
+        let (a, b) = text.find("ZEBRASECRET", true)[0];
+        let rects = text.rects((a, b));
+        drop(doc);
+
+        let mut st = EditorState::open(&src, "t".into()).unwrap();
+        st.handle(EditRequest::Create(NewAnnot {
+            kind: AnnotKind::Redact,
+            parts: vec![(0, rects)],
+            color: [0, 0, 0],
+            contents: String::new(),
+            font_size: 0.0,
+        }))
+        .unwrap();
+        let out = dir.join("doc-redacted.pdf");
+        let EditEvent::Redacted(report) = st
+            .handle(EditRequest::ApplyRedactions { out: out.clone() })
+            .unwrap()
+        else {
+            panic!("expected Redacted")
+        };
+        assert_eq!(report.notes_removed, 1);
+        assert_eq!(report.outline_titles, 1);
+        assert_eq!(report.metadata, ["Title"]);
+
+        let red = PdfDocument::open(out.to_str().unwrap()).unwrap();
+        let page = red.load_pdf_page(0).unwrap();
+        let notes: Vec<_> = page
+            .annotations()
+            .map(|a| dict_text(&a.object(), "Contents").unwrap().unwrap())
+            .collect();
+        assert_eq!(notes, ["unrelated"], "the other note stays");
+        let titles: Vec<_> = red
+            .outlines()
+            .unwrap()
+            .into_iter()
+            .map(|o| o.title)
+            .collect();
+        assert_eq!(titles, ["Introduction", REDACTED_TITLE]);
+
+        st.cleanup();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn quotes_ignore_case_and_line_breaks() {
+        let secrets = BTreeSet::from([squeeze("Jane Doe")]);
+        assert!(quotes("written by JANE\nDOE", &secrets));
+        assert!(!quotes("written by Jane", &secrets));
+    }
+
+    #[test]
+    fn pdf_strings_decode_from_their_encodings() {
+        assert_eq!(decode_pdf_string(b"plain"), "plain");
+        assert_eq!(decode_pdf_string(&[0xFE, 0xFF, 0, b'A', 0x20, 0xAC]), "A€");
+        assert_eq!(decode_pdf_string(&[0xFF, 0xFE, b'A', 0, 0xAC, 0x20]), "A€");
+        assert_eq!(decode_pdf_string(&[0xEF, 0xBB, 0xBF, b'A']), "A");
+    }
+
+    #[test]
+    fn a_failed_write_leaves_the_target_alone() {
+        let dir = std::env::temp_dir().join(format!("vimpdf-replace-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("kept.pdf");
+        std::fs::write(&target, b"old").unwrap();
+
+        let failed = replace_file(&target, |tmp| {
+            std::fs::write(tmp, b"half")?;
+            bail!("disk full")
+        });
+        assert!(failed.is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"old");
+
+        replace_file(&target, |tmp| Ok(std::fs::write(tmp, b"new")?)).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            1,
+            "no temp file left"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// Redacting a marked word removes it from the written copy and leaves
     /// the original alone.
     #[test]
@@ -1159,15 +1436,18 @@ mod tests {
         }))
         .unwrap();
         let out = dir.join("doc-redacted.pdf");
-        let EditEvent::Redacted {
-            marks, leftover, ..
-        } = st
+        let EditEvent::Redacted(report) = st
             .handle(EditRequest::ApplyRedactions { out: out.clone() })
             .unwrap()
         else {
             panic!("expected Redacted")
         };
-        assert_eq!((marks, leftover.len()), (1, 0), "{leftover:?}");
+        assert_eq!(
+            (report.marks, report.leftover.len()),
+            (1, 0),
+            "{:?}",
+            report.leftover
+        );
 
         let red = crate::document::open(&out).unwrap();
         let t = crate::document::page_text(&red, 0).unwrap();

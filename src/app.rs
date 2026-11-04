@@ -628,6 +628,7 @@ impl VimpdfApp {
             Command::Write(path) => self.write(path),
             Command::WriteQuit => self.write_quit(ctx),
             Command::WriteForce => self.write_unchecked(None),
+            Command::WriteOver(path) => self.write_unchecked(Some(path)),
             Command::SaveAs(path) => self.save_as(path),
             Command::OpenAnnotatedCopy => self.open_annotated_copy(ctx),
             Command::ForceQuit => self.force_quit(ctx),

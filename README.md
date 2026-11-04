@@ -290,7 +290,8 @@ steps through them, `Shift+Tab` backwards.
 | `:source` | Reload the config file |
 | `:help` | Help overlay |
 | `:w` | Save annotations into the PDF |
-| `:w <path>` | Save a copy with the annotations |
+| `:w <path>` | Save a copy with the annotations; refuses to replace an existing file |
+| `:w! <path>` | The same, replacing the file if it exists |
 | `:saveas <path>` | Save a copy with the annotations and continue in it. If the folder doesn't exist, vimpdf asks first (`y` creates it and saves, any other key cancels); the same for `:w <path>` and `:redact <path>` |
 | `:w!` | Save into a temporary copy anyway (see "PDFs from the browser") |
 | `:annotated` | Open the other copy of this paper that has your annotations |
@@ -453,8 +454,11 @@ file: it always writes a new one.
    `<name>-redacted.pdf` next to it (`:redact <path>` chooses the name; an
    existing file is never overwritten, the original never). Under each mark,
    text is removed, image pixels are blanked, vector drawings that are fully
-   covered are removed, and a black box is drawn. The file is rewritten from
-   scratch with garbage collection, so nothing removed survives inside it.
+   covered are removed, and a black box is drawn. Marked text is then looked
+   for in the rest of the file (ignoring case and spaces; marks under three
+   characters are skipped): notes and other annotations quoting it are removed,
+   and outline titles quoting it become `[redacted]`. The file is rewritten
+   from scratch with garbage collection, so nothing removed survives inside it.
 3. vimpdf then re-reads the written file and checks that no text is left under
    any mark, reports the result, and opens the redacted file (if your only
    unsaved changes were the marks).
@@ -463,7 +467,8 @@ file: it always writes a new one.
 is part of a figure (labels drawn as shapes, or inside an image) and scanned
 pages are invisible to search: look through the document and cover them with
 area marks (`X`). Document metadata (title, author, keywords in the file's
-properties) is not changed.
+properties) is not changed, but vimpdf warns if it quotes the marked text.
+Form fields and attached files aren't looked at.
 
 ### Reading comfort
 

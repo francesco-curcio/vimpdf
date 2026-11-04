@@ -5,6 +5,7 @@ use eframe::egui::{Stroke, StrokeKind};
 
 use super::place::{Purpose, REDACT_RED};
 use super::*;
+use crate::annotate::RedactReport;
 use crate::annotate::{AnnotKind, EditRequest, NewAnnot};
 use crate::text::{Shape, TextRect};
 
@@ -122,38 +123,61 @@ impl VimpdfApp {
     }
 
     /// After the editor wrote the redacted file.
-    pub(super) fn redaction_done(
-        &mut self,
-        ctx: &egui::Context,
-        path: PathBuf,
-        marks: usize,
-        pages: usize,
-        leftover: Vec<String>,
-    ) {
-        if !leftover.is_empty() {
+    pub(super) fn redaction_done(&mut self, ctx: &egui::Context, report: RedactReport) {
+        if !report.leftover.is_empty() {
             return self.error(format!(
                 "Wrote {} but text is still present under {} mark(s): {}. Don't share it.",
-                path.display(),
-                leftover.len(),
-                leftover.join("; ")
+                report.path.display(),
+                report.leftover.len(),
+                report.leftover.join("; ")
             ));
         }
-        let summary = format!(
-            "Redacted {marks} mark(s) on {pages} page(s) into {} — verified: no text left under the marks",
-            path.display()
-        );
+        let summary = redaction_summary(&report);
+        let warn = !report.metadata.is_empty();
         if self.annots.unsaved_other {
             // Opening the result would lose the other unsaved changes.
             self.info(format!(
-                "{summary}. Save (:w) or discard (:e!) your other changes, then :open it."
+                "{summary} Save (:w) or discard (:e!) your other changes, then :open it."
             ));
         } else {
             // Only redaction marks were unsaved: switch to the redacted file.
             self.annots.unsaved = false;
-            self.open(ctx, path, false);
-            self.info(summary);
+            self.open(ctx, report.path, false);
+            self.info(summary.clone());
+        }
+        if warn {
+            self.error(summary);
         }
     }
+}
+
+/// What `:redact` tells: first what still needs a look, as a long message
+/// gets cut off in the status bar.
+fn redaction_summary(r: &RedactReport) -> String {
+    let mut parts = Vec::new();
+    if !r.metadata.is_empty() {
+        parts.push(format!(
+            "Don't share it yet: the document's properties still quote the text ({}).",
+            r.metadata.join(", ")
+        ));
+    }
+    let name = r.path.file_name().unwrap_or(r.path.as_os_str());
+    parts.push(format!(
+        "Redacted {} mark(s) on {} page(s) into {}, verified: no text left under the marks.",
+        r.marks,
+        r.pages,
+        name.display()
+    ));
+    if r.notes_removed > 0 {
+        parts.push(format!("Removed {} quoting note(s).", r.notes_removed));
+    }
+    if r.outline_titles > 0 {
+        parts.push(format!(
+            "Replaced {} quoting outline title(s).",
+            r.outline_titles
+        ));
+    }
+    parts.join(" ")
 }
 
 /// `paper.pdf` → `paper-redacted.pdf` (or `-redacted-2` … if it exists).
@@ -181,6 +205,29 @@ pub(super) fn marks_not_applied(n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_summary_says_what_else_went_and_what_stayed() {
+        let mut report = RedactReport {
+            path: "/a/long/way/a.pdf".into(),
+            marks: 2,
+            pages: 1,
+            leftover: Vec::new(),
+            notes_removed: 0,
+            outline_titles: 0,
+            metadata: Vec::new(),
+        };
+        assert!(!redaction_summary(&report).contains("Removed"));
+        report.notes_removed = 1;
+        report.outline_titles = 2;
+        report.metadata = vec!["Title".into()];
+        let text = redaction_summary(&report);
+        assert!(text.contains("Removed 1 quoting note"), "{text}");
+        assert!(text.contains("Replaced 2 quoting outline"), "{text}");
+        assert!(text.starts_with("Don't share it yet"), "{text}");
+        assert!(text.contains("(Title)"), "{text}");
+        assert!(text.contains(" into a.pdf,"), "{text}");
+    }
 
     #[test]
     fn redacted_path_never_overwrites() {
