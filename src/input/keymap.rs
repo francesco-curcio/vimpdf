@@ -79,13 +79,51 @@ fn normalize_special(inner: &str) -> Result<String, String> {
     Ok(s)
 }
 
+/// Punctuation keys by name: `<D-,>` can also be written `<D-Comma>`.
+/// Tokens always use the character.
+const PUNCTUATION: &[(&str, &str)] = &[
+    ("Colon", ":"),
+    ("Comma", ","),
+    ("Minus", "-"),
+    ("Period", "."),
+    ("Plus", "+"),
+    ("Equals", "="),
+    ("Semicolon", ";"),
+    ("Backslash", "\\"),
+    ("Slash", "/"),
+    ("Pipe", "|"),
+    ("Questionmark", "?"),
+    ("Exclamationmark", "!"),
+    ("OpenBracket", "["),
+    ("CloseBracket", "]"),
+    ("OpenCurlyBracket", "{"),
+    ("CloseCurlyBracket", "}"),
+    ("Backtick", "`"),
+    ("Quote", "'"),
+];
+
+/// The character of a punctuation key's name ("Comma" → ",").
+pub fn punctuation(name: &str) -> Option<&'static str> {
+    PUNCTUATION
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|(_, c)| *c)
+}
+
 fn canonical_key_name(name: &str) -> Option<String> {
     const NAMES: &[&str] = &[
         "Space", "Esc", "Tab", "CR", "BS", "Del", "Copy", "Up", "Down", "Left", "Right", "Home",
-        "End", "PageUp", "PageDown", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10",
-        "F11", "F12",
+        "End", "PageUp", "PageDown",
     ];
+    if let Some(c) = punctuation(name) {
+        return Some(c.to_owned());
+    }
     let lower = name.to_ascii_lowercase();
+    if let Some(n) = lower.strip_prefix('f').and_then(|n| n.parse::<u32>().ok())
+        && (1..=35).contains(&n)
+    {
+        return Some(format!("F{n}"));
+    }
     let alias = match lower.as_str() {
         "enter" | "return" => "CR",
         "escape" => "Esc",
@@ -100,7 +138,9 @@ fn canonical_key_name(name: &str) -> Option<String> {
     NAMES
         .iter()
         .find(|n| n.to_ascii_lowercase() == lower)
-        .map(|n| (*n).to_owned())
+        .copied()
+        .or_else(|| super::key_name(name))
+        .map(str::to_owned)
 }
 
 /// A sequence in config notation, which `parse_sequence` reads back: the
@@ -500,6 +540,10 @@ mod tests {
         assert_eq!(parse_sequence("<space>").unwrap(), vec!["<Space>"]);
         assert_eq!(parse_sequence("m<Tab>").unwrap(), vec!["m", "<Tab>"]);
         assert_eq!(parse_sequence("<C-->").unwrap(), vec!["<C-->"]);
+        for spelling in ["<D-,>", "<D-Comma>", "<D-comma>", "<d-COMMA>"] {
+            assert_eq!(parse_sequence(spelling).unwrap(), vec!["<D-,>"]);
+        }
+        assert_eq!(parse_sequence("<D-Minus>").unwrap(), vec!["<D-->"]);
         assert_eq!(parse_sequence("<").unwrap(), vec!["<"]);
         assert_eq!(parse_sequence("<lt>").unwrap(), vec!["<"]);
         assert!(parse_sequence("<X-a>").is_err());

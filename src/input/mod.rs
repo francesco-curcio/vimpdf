@@ -41,7 +41,35 @@ pub fn key_tokens(events: &[Event]) -> Vec<String> {
     out
 }
 
+/// The spelling of a key's name, whatever its case ("insert" → "Insert").
+fn key_name(name: &str) -> Option<&'static str> {
+    Key::ALL
+        .iter()
+        .map(|k| k.name())
+        .find(|n| n.eq_ignore_ascii_case(name))
+}
+
+fn is_modifier(key: Key) -> bool {
+    matches!(
+        key,
+        Key::ShiftLeft
+            | Key::ShiftRight
+            | Key::ControlLeft
+            | Key::ControlRight
+            | Key::AltLeft
+            | Key::AltRight
+            | Key::SuperLeft
+            | Key::SuperRight
+            | Key::Fn
+            | Key::CapsLock
+    )
+}
+
 fn key_token(key: Key, m: Modifiers) -> Option<String> {
+    // A modifier held down isn't a key of its own: Cmd+W is one key, W.
+    if is_modifier(key) {
+        return None;
+    }
     let special = match key {
         Key::Space => Some("Space"),
         Key::Escape => Some("Esc"),
@@ -90,7 +118,8 @@ fn key_token(key: Key, m: Modifiers) -> Option<String> {
                     };
                     return Some(wrap(m, &c.to_string(), false));
                 }
-                _ => name.to_owned(),
+                // Punctuation as the character, as in the keymap's notation.
+                _ => keymap::punctuation(name).unwrap_or(name).to_owned(),
             }
         }
     };
@@ -171,5 +200,32 @@ mod tests {
         for t in &toks {
             assert_eq!(&keymap::parse_sequence(t).unwrap()[0], t);
         }
+    }
+
+    /// Whatever key is pressed, the token can be written in the config
+    /// and read back as the same key.
+    #[test]
+    fn every_chord_can_be_bound() {
+        let cmd = Modifiers {
+            mac_cmd: true,
+            command: true,
+            ..Default::default()
+        };
+        let shift = Modifiers { shift: true, ..cmd };
+        for &k in Key::ALL {
+            if is_modifier(k) {
+                assert!(key_tokens(&[key(k, cmd)]).is_empty(), "{k:?}");
+                continue;
+            }
+            for m in [cmd, shift] {
+                let toks = key_tokens(&[key(k, m)]);
+                let tok = toks.first().unwrap_or_else(|| panic!("no token: {k:?}"));
+                let seq = vec![tok.clone()];
+                let written = keymap::seq_to_string(&seq);
+                assert_eq!(keymap::parse_sequence(&written), Ok(seq), "{k:?}");
+            }
+        }
+        assert_eq!(key_tokens(&[key(Key::Comma, cmd)]), vec!["<D-,>"]);
+        assert_eq!(key_tokens(&[key(Key::Minus, cmd)]), vec!["<D-->"]);
     }
 }

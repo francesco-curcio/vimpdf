@@ -132,6 +132,8 @@ Keys use vim notation: printable characters as themselves (`"G"`, `"+"`), and
 letter implies Shift), `<A-x>` (Alt/Option), `<D-x>` (Cmd), `<S-Space>`,
 `<Space>`, `<Esc>`, `<Tab>`, `<CR>`, `<BS>`, `<Up>`/`<Down>`/`<Left>`/`<Right>`,
 `<Home>`, `<End>`, `<PageUp>`, `<PageDown>`, `<F1>`…`<F12>`, `<lt>` for `<`.
+Punctuation goes as the character or by name: `<D-,>` and `<D-Comma>` are the
+same key (`Minus`, `Period`, `Slash`, `Semicolon`, `Quote`, `Equals`…).
 Sequences combine them: `"gg"`, `"m<Tab>"`. A count typed before a binding
 multiplies it (`5x` with the example above scrolls 15 steps).
 
