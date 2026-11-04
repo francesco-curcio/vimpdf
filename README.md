@@ -93,7 +93,7 @@ fish_add_path ~/.cargo/bin   # once, if ~/.cargo/bin isn't on your PATH
 
 ```fish
 scripts/bundle-macos.sh             # builds target/vimpdf.app
-scripts/bundle-macos.sh --install   # …and copies it to ~/Applications
+scripts/bundle-macos.sh --install   # …copies it to ~/Applications and updates the `vimpdf` command
 ```
 
 The bundle declares PDF as a document type it can view, so after installing

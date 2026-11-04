@@ -4,7 +4,8 @@
 # handler.
 #
 #   scripts/bundle-macos.sh             build target/vimpdf.app
-#   scripts/bundle-macos.sh --install   also copy it to ~/Applications
+#   scripts/bundle-macos.sh --install   also copy it to ~/Applications and
+#                                       update the `vimpdf` terminal command
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -58,4 +59,7 @@ if [[ "${1:-}" == "--install" ]]; then
     lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
     [[ -x "$lsregister" ]] && "$lsregister" -f "$HOME/Applications/vimpdf.app"
     echo "installed ~/Applications/vimpdf.app"
+    # The terminal command is a separate binary: keep it the same version.
+    cargo install --path . --locked --force --quiet
+    echo "installed the vimpdf command ($(command -v vimpdf || echo "~/.cargo/bin/vimpdf"))"
 fi
