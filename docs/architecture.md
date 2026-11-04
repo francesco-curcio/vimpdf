@@ -33,6 +33,15 @@ arrives until the tab is active again. Things that must cover every tab (quit
 with unsaved annotations, saving reading positions on exit) swap each parked
 tab in and out (`for_each_parked`).
 
+A tab restored from the last session starts as `Slot::Unopened`, just a path:
+it costs no threads and opens the first time it's shown (`load_tab`). If its
+file is gone by then, the tab goes away with a message.
+
+Opening a document leaves no viewport until the next frame lays it out. A
+command that arrives in between waits in `held_commands` and runs on that
+frame, which is what lets a pair like `GotoTab` + `Quit` reach a tab that is
+only now opening.
+
 Only one vimpdf runs per user: `platform::instance` listens on a Unix socket
 in the private temp dir, and a later `vimpdf file.pdf` sends the path there
 and exits. Paths from the socket, from macOS's `application:openURLs:` and
@@ -256,7 +265,8 @@ collected as warnings, never fatal. Key overrides are applied on top of
 | File | Role |
 | --- | --- |
 | `main.rs` | CLI, logging, config load, window options |
-| `app.rs` | `VimpdfApp`: frame loop, command execution, screen split |
+| `app.rs` | `VimpdfApp`: frame loop, command execution |
+| `app/frame.rs` | One frame's steps: screen split, input, drawing the pages, the bars and panels |
 | `view.rs` | `DocView`: one open document (layout, renderer, textures, links) |
 | `document.rs` | MuPDF wrapper: page sizes, links, `PageRenderer` |
 | `layout.rs` | Page rectangles in document space |

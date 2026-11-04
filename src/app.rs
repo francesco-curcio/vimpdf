@@ -22,6 +22,7 @@ use crate::viewport::{FitMode, Viewport};
 
 mod annotations;
 mod confirm;
+mod frame;
 mod hints;
 mod menu;
 mod place;
@@ -99,6 +100,8 @@ pub struct VimpdfApp {
     /// The tab to show once the last session's tabs are open.
     /// The last session's tabs and the active one, until the first frame.
     restored: Option<(Vec<PathBuf>, Option<PathBuf>)>,
+    /// Commands waiting for a viewport.
+    held_commands: Vec<Command>,
     /// An image to put on the clipboard (`Y`), sent at the end of the frame.
     clipboard_image: Option<egui::ColorImage>,
     link_preview: preview::LinkPreview,
@@ -174,6 +177,7 @@ impl VimpdfApp {
             show_props: false,
             settings: None,
             restored: None,
+            held_commands: Vec::new(),
             clipboard_image: None,
             link_preview: Default::default(),
             confirm: None,
@@ -451,37 +455,19 @@ impl VimpdfApp {
             return;
         }
         let step = self.config.scroll_step;
-        let (screen, zoom_step) = match &self.viewport {
-            Some(vp) => (vp.height, self.config.zoom_step),
+        let screen = match &self.viewport {
+            Some(vp) => vp.height,
             None => {
-                // Nothing runs before the next frame lays out the document:
-                // whoever sends several commands in a row has to wait for it.
-                tracing::warn!(?cmd, "command dropped: no viewport yet");
+                // Opening a document drops the viewport until the next frame
+                // lays it out: what comes right after it waits for that.
+                tracing::debug!(?cmd, "command held: no viewport yet");
+                self.held_commands.push(cmd);
+                ctx.request_repaint();
                 return;
             }
         };
-        if self.mode == Mode::Visual {
-            let dy = match cmd {
-                Command::HalfPageDown(n) => n as f32 * screen / 2.0,
-                Command::HalfPageUp(n) => -(n as f32) * screen / 2.0,
-                Command::ScreenDown(n) => n as f32 * screen,
-                Command::ScreenUp(n) => -(n as f32) * screen,
-                _ => 0.0,
-            };
-            if dy != 0.0 {
-                self.caret_follow_scroll(dy);
-            }
-        }
-        match cmd {
-            Command::ScrollDown(n) => return self.scroll(0.0, n as f32 * step),
-            Command::ScrollUp(n) => return self.scroll(0.0, -(n as f32) * step),
-            Command::ScrollLeft(n) => return self.scroll(-(n as f32) * step, 0.0),
-            Command::ScrollRight(n) => return self.scroll(n as f32 * step, 0.0),
-            Command::HalfPageDown(n) => return self.scroll(0.0, n as f32 * screen / 2.0),
-            Command::HalfPageUp(n) => return self.scroll(0.0, -(n as f32) * screen / 2.0),
-            Command::ScreenDown(n) => return self.scroll(0.0, n as f32 * screen),
-            Command::ScreenUp(n) => return self.scroll(0.0, -(n as f32) * screen),
-            _ => {}
+        if self.scroll_command(&cmd, step, screen) {
+            return;
         }
 
         // Everything else moves instantly (or not at all).
@@ -496,52 +482,23 @@ impl VimpdfApp {
         if is_jump && let Some(pos) = self.position() {
             self.jumps.push(pos);
         }
-        let Some(vp) = self.viewport.as_mut() else {
-            return;
-        };
-        let layout = &self.view.layout;
-        let (cx, cy) = (vp.width / 2.0, vp.height / 2.0);
         match cmd {
-            Command::ScrollBy { dx, dy } => vp.scroll_by(dx, dy),
-            Command::NextPage(n) => vp.next_page(layout, n as usize),
-            Command::PrevPage(n) => vp.prev_page(layout, n as usize),
-            Command::GotoFirst => vp.goto_page(layout, 0),
-            Command::GotoLast => vp.goto_end(layout),
-            Command::GotoPage(0) => self.error("Pages start at 1"),
-            Command::GotoPage(n) if n > layout.len() => {
-                self.error(format!("No page {n} (last is {})", layout.len()));
-            }
-            Command::GotoPage(n) => vp.goto_page(layout, n - 1),
-            Command::ZoomIn(n) => vp.zoom_by(zoom_step.powi(n as i32), cx, cy),
-            Command::ZoomOut(n) => vp.zoom_by(zoom_step.powi(-(n as i32)), cx, cy),
-            Command::ZoomReset => vp.zoom_to(1.0, cx, cy),
-            Command::ZoomTo(percent) => vp.zoom_to(percent / 100.0, cx, cy),
-            Command::ZoomBy { factor, x, y } => vp.zoom_by(factor, x, y),
-            Command::FitWidth => vp.fit_width(layout, PAGE_MARGIN),
-            Command::FitPage => vp.fit_page(layout, PAGE_MARGIN),
-            Command::FollowLink(LinkTarget::Internal { page, x, y }) => {
-                vp.goto_page(layout, page);
-                let r = layout.page(page.min(layout.len() - 1));
-                if let Some(y) = y {
-                    // A little context above the destination (e.g. a heading).
-                    vp.y = r.y + y - LINK_CONTEXT / vp.zoom;
-                }
-                if let Some(x) = x
-                    && (r.x + x < vp.x || r.x + x > vp.x + vp.doc_width())
-                {
-                    vp.x = r.x + x - LINK_CONTEXT / vp.zoom;
-                }
-            }
+            Command::ScrollBy { .. }
+            | Command::NextPage(_)
+            | Command::PrevPage(_)
+            | Command::GotoFirst
+            | Command::GotoLast
+            | Command::GotoPage(_)
+            | Command::ZoomIn(_)
+            | Command::ZoomOut(_)
+            | Command::ZoomReset
+            | Command::ZoomTo(_)
+            | Command::ZoomBy { .. }
+            | Command::FitWidth
+            | Command::FitPage
+            | Command::FollowLink(LinkTarget::Internal { .. }) => self.move_view(cmd),
             Command::Hints(action) => self.start_hints(action),
-            Command::JumpBack(n) => {
-                if let Some(cur) = self.position()
-                    && let Some(pos) = self.jumps.back(cur, n as usize)
-                {
-                    self.goto_position(pos);
-                } else {
-                    self.info("At the oldest jump");
-                }
-            }
+            Command::JumpBack(n) => self.jump_back(n as usize),
             Command::JumpForward(n) => match self.jumps.forward(n as usize) {
                 Some(pos) => self.goto_position(pos),
                 None => self.info("At the newest jump"),
@@ -553,44 +510,26 @@ impl VimpdfApp {
                     self.info(format!("Mark '{c}' set"));
                 }
             }
-            Command::GotoMark(c) => match (self.jumps.mark(c), self.position()) {
-                (Some(target), Some(cur)) => {
-                    self.jumps.push(cur);
-                    self.goto_position(target);
-                }
-                _ => self.error(format!("Mark '{c}' not set")),
-            },
+            Command::GotoMark(c) => self.goto_mark(c),
             Command::FollowLink(LinkTarget::External(uri)) => match links::open_external(&uri) {
                 Ok(()) => self.info(format!("Opening {uri}")),
                 Err(err) => self.error(err),
             },
             Command::EnterCommandLine(prefill) => {
-                self.keys.reset();
-                self.prompt_return = self.prompt_mode();
-                self.mode = Mode::Command;
+                self.enter_prompt(Mode::Command);
                 self.cmdline.open(&prefill);
             }
             Command::EnterSearch(prefill) => {
-                self.keys.reset();
-                self.prompt_return = self.prompt_mode();
-                self.mode = Mode::Search;
+                self.enter_prompt(Mode::Search);
                 self.searchline.open(&prefill);
             }
-            Command::Search(query) => {
-                let page = vp.current_page(layout);
-                let origin_y = vp.y - layout.page(page).y;
-                self.start_search(query, page, origin_y);
-            }
+            Command::Search(query) => self.search_from_here(query),
             Command::SearchNext(n) => self.search_step(n as usize, true),
             Command::SearchPrev(n) => self.search_step(n as usize, false),
             Command::ToggleStatusbar => self.config.statusbar = !self.config.statusbar,
             Command::ToggleToolbar => self.config.toolbar = !self.config.toolbar,
             Command::ToggleHelp => self.show_help = !self.show_help,
-            Command::ToggleRecolor => {
-                self.config.recolor = !self.config.recolor;
-                let state = if self.config.recolor { "on" } else { "off" };
-                self.info(format!("Recolor {state}"));
-            }
+            Command::ToggleRecolor => self.toggle_recolor(),
             Command::ToggleOutline => self.toggle_outline(),
             Command::PinOutline => self.pin_outline(),
             Command::ToggleFullscreen => {
@@ -637,15 +576,8 @@ impl VimpdfApp {
             Command::ForceQuit => self.force_quit(ctx),
             Command::RedactSelection => self.redact_selection(),
             Command::RedactArea => self.start_redact_area(),
-            Command::PlaceNote => {
-                let color = self.note_color();
-                self.start_placing(place::Purpose::Note { color });
-            }
-            Command::PlaceText => {
-                let color = self.text_color();
-                let size = self.config.text_size;
-                self.start_placing(place::Purpose::Text { size, color });
-            }
+            Command::PlaceNote => self.start_placing_note(),
+            Command::PlaceText => self.start_placing_text(),
             Command::AddNoteAt { page, x, y } => self.add_note_at(page, x, y),
             Command::AddTextAt { page, x, y } => self.add_text_at(page, x, y),
             Command::MoveAnnot { page, xref } => self.start_moving(page, xref),
@@ -660,40 +592,17 @@ impl VimpdfApp {
             Command::ToggleScrollbar => self.config.scrollbar = !self.config.scrollbar,
             Command::EditConfig => self.edit_config(),
             Command::CopyArea => self.start_copy_area(),
-            Command::OpenSettings | Command::OpenKeyBindings => {
-                if self.settings.is_none() {
-                    let file = self
-                        .config_path
-                        .as_deref()
-                        .map_or_else(Config::default, |p| Config::load(p).0);
-                    self.settings = Some(ui::settings::SettingsWindow::new(&self.config, file));
-                }
-                if cmd == Command::OpenKeyBindings
-                    && let Some(settings) = self.settings.as_mut()
-                {
+            Command::OpenSettings => self.open_settings(),
+            Command::OpenKeyBindings => {
+                self.open_settings();
+                if let Some(settings) = self.settings.as_mut() {
                     settings.show_keys();
                 }
             }
             Command::ToggleProperties => self.show_props = !self.show_props,
-            Command::Set { option, value } => match self.config.set_from_str(&option, &value) {
-                Ok(key) => {
-                    let mut warnings = Vec::new();
-                    self.install_font(ctx, &mut warnings);
-                    if warnings.is_empty() {
-                        self.info(format!("{key} = {value}"));
-                    } else {
-                        self.report_warnings(warnings);
-                    }
-                }
-                Err(e) => self.error(format!(":set {option}: {e}")),
-            },
+            Command::Set { option, value } => self.set_option(ctx, &option, &value),
             Command::Source => self.source_config(ctx),
-            Command::Cancel => {
-                self.message = None;
-                self.show_help = false;
-                self.view.search.highlight = false;
-                self.exit_visual();
-            }
+            Command::Cancel => self.cancel(),
             Command::Visual { linewise } => self.visual(linewise),
             Command::Move(motion, n) => self.move_caret(motion, n as usize),
             Command::SwapEnds => self.swap_ends(),
@@ -719,6 +628,160 @@ impl VimpdfApp {
             | Command::ScreenDown(_)
             | Command::ScreenUp(_) => unreachable!("handled above"),
         }
+    }
+
+    /// The commands that scroll smoothly. True if `cmd` was one.
+    fn scroll_command(&mut self, cmd: &Command, step: f32, screen: f32) -> bool {
+        let (dx, dy) = match *cmd {
+            Command::ScrollDown(n) => (0.0, n as f32 * step),
+            Command::ScrollUp(n) => (0.0, -(n as f32) * step),
+            Command::ScrollLeft(n) => (-(n as f32) * step, 0.0),
+            Command::ScrollRight(n) => (n as f32 * step, 0.0),
+            Command::HalfPageDown(n) => (0.0, n as f32 * screen / 2.0),
+            Command::HalfPageUp(n) => (0.0, -(n as f32) * screen / 2.0),
+            Command::ScreenDown(n) => (0.0, n as f32 * screen),
+            Command::ScreenUp(n) => (0.0, -(n as f32) * screen),
+            _ => return false,
+        };
+        let by_pages = !matches!(
+            cmd,
+            Command::ScrollDown(_)
+                | Command::ScrollUp(_)
+                | Command::ScrollLeft(_)
+                | Command::ScrollRight(_)
+        );
+        if self.mode == Mode::Visual && by_pages {
+            self.caret_follow_scroll(dy);
+        }
+        self.scroll(dx, dy);
+        true
+    }
+
+    /// The commands that move or zoom the view at once.
+    fn move_view(&mut self, cmd: Command) {
+        let zoom_step = self.config.zoom_step;
+        let Some(vp) = self.viewport.as_mut() else {
+            return;
+        };
+        let layout = &self.view.layout;
+        let (cx, cy) = (vp.width / 2.0, vp.height / 2.0);
+        match cmd {
+            Command::ScrollBy { dx, dy } => vp.scroll_by(dx, dy),
+            Command::NextPage(n) => vp.next_page(layout, n as usize),
+            Command::PrevPage(n) => vp.prev_page(layout, n as usize),
+            Command::GotoFirst => vp.goto_page(layout, 0),
+            Command::GotoLast => vp.goto_end(layout),
+            Command::GotoPage(0) => self.error("Pages start at 1"),
+            Command::GotoPage(n) if n > layout.len() => {
+                self.error(format!("No page {n} (last is {})", layout.len()));
+            }
+            Command::GotoPage(n) => vp.goto_page(layout, n - 1),
+            Command::ZoomIn(n) => vp.zoom_by(zoom_step.powi(n as i32), cx, cy),
+            Command::ZoomOut(n) => vp.zoom_by(zoom_step.powi(-(n as i32)), cx, cy),
+            Command::ZoomReset => vp.zoom_to(1.0, cx, cy),
+            Command::ZoomTo(percent) => vp.zoom_to(percent / 100.0, cx, cy),
+            Command::ZoomBy { factor, x, y } => vp.zoom_by(factor, x, y),
+            Command::FitWidth => vp.fit_width(layout, PAGE_MARGIN),
+            Command::FitPage => vp.fit_page(layout, PAGE_MARGIN),
+            Command::FollowLink(LinkTarget::Internal { page, x, y }) => {
+                vp.goto_page(layout, page);
+                let r = layout.page(page.min(layout.len() - 1));
+                if let Some(y) = y {
+                    // A little context above the destination (e.g. a heading).
+                    vp.y = r.y + y - LINK_CONTEXT / vp.zoom;
+                }
+                if let Some(x) = x
+                    && (r.x + x < vp.x || r.x + x > vp.x + vp.doc_width())
+                {
+                    vp.x = r.x + x - LINK_CONTEXT / vp.zoom;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn jump_back(&mut self, n: usize) {
+        if let Some(cur) = self.position()
+            && let Some(pos) = self.jumps.back(cur, n)
+        {
+            self.goto_position(pos);
+        } else {
+            self.info("At the oldest jump");
+        }
+    }
+
+    fn goto_mark(&mut self, c: char) {
+        match (self.jumps.mark(c), self.position()) {
+            (Some(target), Some(cur)) => {
+                self.jumps.push(cur);
+                self.goto_position(target);
+            }
+            _ => self.error(format!("Mark '{c}' not set")),
+        }
+    }
+
+    /// Hand the keyboard to the command line or the search line.
+    fn enter_prompt(&mut self, mode: Mode) {
+        self.keys.reset();
+        self.prompt_return = self.prompt_mode();
+        self.mode = mode;
+    }
+
+    fn search_from_here(&mut self, query: String) {
+        let Some(vp) = &self.viewport else { return };
+        let layout = &self.view.layout;
+        let page = vp.current_page(layout);
+        let origin_y = vp.y - layout.page(page).y;
+        self.start_search(query, page, origin_y);
+    }
+
+    fn toggle_recolor(&mut self) {
+        self.config.recolor = !self.config.recolor;
+        let state = if self.config.recolor { "on" } else { "off" };
+        self.info(format!("Recolor {state}"));
+    }
+
+    fn start_placing_note(&mut self) {
+        let color = self.note_color();
+        self.start_placing(place::Purpose::Note { color });
+    }
+
+    fn start_placing_text(&mut self) {
+        let color = self.text_color();
+        let size = self.config.text_size;
+        self.start_placing(place::Purpose::Text { size, color });
+    }
+
+    fn open_settings(&mut self) {
+        if self.settings.is_none() {
+            let file = self
+                .config_path
+                .as_deref()
+                .map_or_else(Config::default, |p| Config::load(p).0);
+            self.settings = Some(ui::settings::SettingsWindow::new(&self.config, file));
+        }
+    }
+
+    fn set_option(&mut self, ctx: &egui::Context, option: &str, value: &str) {
+        match self.config.set_from_str(option, value) {
+            Ok(key) => {
+                let mut warnings = Vec::new();
+                self.install_font(ctx, &mut warnings);
+                if warnings.is_empty() {
+                    self.info(format!("{key} = {value}"));
+                } else {
+                    self.report_warnings(warnings);
+                }
+            }
+            Err(e) => self.error(format!(":set {option}: {e}")),
+        }
+    }
+
+    fn cancel(&mut self) {
+        self.message = None;
+        self.show_help = false;
+        self.view.search.highlight = false;
+        self.exit_visual();
     }
 
     fn position(&self) -> Option<Position> {
@@ -966,78 +1029,10 @@ fn color32(c: Color) -> Color32 {
 impl eframe::App for VimpdfApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        if let Some(present) = self.present.take() {
-            frame.set_wgpu_surface_config(present);
-        }
-        if self.first_frame {
-            // Launched from a terminal, the window doesn't always get focus.
-            ctx.send_viewport_cmd(ViewportCommand::Focus);
-            self.first_frame = false;
-        }
-        // vimpdf handles the keyboard itself: egui's Tab focus navigation must
-        // not leave a button focused, or Enter/Space would "click" it. Only
-        // text fields (command line, toolbar page box) keep focus.
-        if !ctx.text_edit_focused()
-            && let Some(id) = ctx.memory(|m| m.focused())
-        {
-            ctx.memory_mut(|m| m.surrender_focus(id));
-        }
-
-        // Split the window: toolbar, pages, status bar / command line.
+        self.start_frame(&ctx, frame);
         let font_size = self.config.font_size;
-        let mut area = ui.max_rect();
-        // Fullscreen is for reading: the bars above the pages step aside.
-        // The menu bar still opens from the keyboard.
-        let top_bars = !ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-        let menubar_rect =
-            ((self.config.menubar && top_bars) || self.mode == Mode::Menu).then(|| {
-                let h = ui::bar_height(font_size);
-                let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
-                area.min.y += h;
-                r
-            });
-        let tabbar_rect = (self.config.tabbar && top_bars).then(|| {
-            let h = ui::tabbar::height(font_size);
-            let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
-            area.min.y += h;
-            r
-        });
-        let toolbar_rect = (self.config.toolbar && top_bars).then(|| {
-            let h = toolbar::height(font_size);
-            let r = Rect::from_min_size(area.min, Vec2::new(area.width(), h));
-            area.min.y += h;
-            r
-        });
-        let bottom_rect = (self.config.statusbar
-            || self.mode != Mode::Normal
-            || self.confirm.is_some())
-        .then(|| {
-            let h = ui::bar_height(font_size);
-            area.max.y -= h;
-            Rect::from_min_size(area.left_bottom(), Vec2::new(area.width(), h))
-        });
-
-        // The outline: pinned, it takes a strip on the left and the pages
-        // move right; opened with <Tab> only, it covers the pages.
-        let on_start = self.on_start_page();
-        let outline_rect =
-            ((self.config.outline_pinned && !on_start) || self.mode == Mode::Outline).then(|| {
-                let max = (area.width() * 0.7).max(OUTLINE_MIN_WIDTH);
-                let w = self.config.outline_width.clamp(OUTLINE_MIN_WIDTH, max);
-                let r = Rect::from_min_size(area.min, Vec2::new(w, area.height()));
-                if self.config.outline_pinned {
-                    area.min.x += w;
-                }
-                r
-            });
-        // The scrollbar takes a strip on the right; the pages fit beside it.
-        let scrollbar_rect = (self.config.scrollbar && !on_start).then(|| {
-            area.max.x -= ui::scrollbar::WIDTH;
-            Rect::from_min_max(
-                egui::pos2(area.max.x, area.min.y),
-                egui::pos2(area.max.x + ui::scrollbar::WIDTH, area.max.y),
-            )
-        });
+        let window = self.split_window(&ctx, ui.max_rect());
+        let area = window.pages;
 
         if self.viewport.is_none() {
             self.viewport = Some(self.new_viewport(area));
@@ -1056,41 +1051,7 @@ impl eframe::App for VimpdfApp {
 
         // Input → commands.
         self.update_start_screen();
-        let mut commands = self.keyboard_commands(&ctx);
-        let mut cursor = egui::CursorIcon::Default;
-        if self.mode == Mode::Place && !ctx.egui_wants_pointer_input() {
-            self.place_mouse(&ctx, area);
-            let hover = ctx
-                .input(|i| i.pointer.hover_pos())
-                .filter(|p| area.contains(*p));
-            if let Some(c) = self.place_hover_cursor(hover) {
-                cursor = c;
-            }
-        } else if !ctx.egui_wants_pointer_input() && self.menu.is_none() && self.start.is_none() {
-            let (cmds, text_cursor) = self.mouse_selection(&ctx, area);
-            commands.extend(cmds);
-            if let Some(c) = text_cursor {
-                cursor = c;
-            }
-        }
-        if !ctx.egui_wants_pointer_input()
-            && self.menu.is_none()
-            && self.start.is_none()
-            && let Some(vp) = &self.viewport
-        {
-            let m = mouse::handle(
-                &ctx,
-                area,
-                vp,
-                &self.view.layout,
-                &self.view.links,
-                self.config.zoom_modifier,
-            );
-            commands.extend(m.commands);
-            if m.cursor != egui::CursorIcon::Default {
-                cursor = m.cursor;
-            }
-        }
+        let (commands, mut cursor) = self.frame_input(&ctx, area);
         if let Some(linewise) = self.visual_pending {
             self.visual(linewise);
         }
@@ -1107,7 +1068,7 @@ impl eframe::App for VimpdfApp {
             return;
         };
         let mut scrollbar_drag = None;
-        if let Some(rect) = scrollbar_rect {
+        if let Some(rect) = window.scrollbar {
             let total = self.view.layout.height();
             let s = ui::scrollbar::show(ui, rect, vp.y, vp.doc_height(), total);
             if let Some(y) = s.y {
@@ -1139,24 +1100,7 @@ impl eframe::App for VimpdfApp {
         let vp = vp.clone();
         self.view.receive_results(&ctx);
         self.view.request_text(&vp);
-        let scale = ScaleKey::from_scale(vp.zoom * ctx.pixels_per_point());
-        let recolor = self.recolor();
-        self.view
-            .schedule(&ctx, &vp, scale, recolor, self.scrolling_up);
-        let painter = ui.painter().with_clip_rect(area);
-        painter.rect_filled(area, 0.0, BACKGROUND);
-        let page_color = self.page_color();
-        self.view
-            .draw(&painter, area, &vp, scale, recolor, page_color);
-        self.draw_search_highlights(&painter, area, &vp);
-        self.draw_annotation_markers(&ctx, &painter, area, &vp);
-        self.draw_redactions(&painter, area, &vp);
-        self.draw_placing(&painter, area, &vp);
-        self.draw_selection(&painter, area, &vp);
-        self.draw_hints(&painter, area, &vp);
-        if let Some(thumb) = scrollbar_drag {
-            self.draw_scrollbar_page(&painter, thumb, &vp);
-        }
+        self.draw_pages(ui, &ctx, area, &vp, scrollbar_drag);
         let (preview_command, preview_cursor) = self.show_link_preview(&ctx, area, &vp);
         if let Some(c) = preview_cursor {
             cursor = c;
@@ -1167,43 +1111,16 @@ impl eframe::App for VimpdfApp {
         }
 
         // Bars and overlays.
-        if self
-            .message
-            .as_ref()
-            .is_some_and(|m| m.since.elapsed() >= MESSAGE_DURATION)
-        {
-            self.message = None;
-        }
-        if let Some(m) = &self.message {
-            ctx.request_repaint_after(MESSAGE_DURATION.saturating_sub(m.since.elapsed()));
-        }
-
-        let page = vp.centre_page(&self.view.layout) + 1;
-        let pages = self.view.page_count();
+        self.expire_message(&ctx);
         let mut ui_commands = Vec::new();
         ui_commands.extend(start_command);
         ui_commands.extend(preview_command);
-        if let Some(rect) = tabbar_rect {
-            let main = tabs::is_main_window();
-            use ui::tabbar::TabAction;
-            match ui::tabbar::show(ui, rect, &self.tab_labels(), font_size, main) {
-                Some(TabAction::Switch(i)) => ui_commands.push(Command::GotoTab(i + 1)),
-                Some(TabAction::Close(i)) => {
-                    ui_commands.push(Command::GotoTab(i + 1));
-                    ui_commands.push(Command::Quit);
-                }
-                Some(TabAction::Detach(i)) => {
-                    ui_commands.push(Command::GotoTab(i + 1));
-                    ui_commands.push(Command::DetachTab);
-                }
-                Some(TabAction::Attach(i)) => {
-                    ui_commands.push(Command::GotoTab(i + 1));
-                    ui_commands.push(Command::AttachTab);
-                }
-                None => {}
-            }
+        if let Some(rect) = window.tabbar {
+            self.show_tabbar(ui, rect, &mut ui_commands);
         }
-        if let Some(rect) = toolbar_rect {
+        if let Some(rect) = window.toolbar {
+            let page = vp.centre_page(&self.view.layout) + 1;
+            let pages = self.view.page_count();
             ui_commands.extend(self.toolbar.show(
                 ui,
                 rect,
@@ -1213,78 +1130,7 @@ impl eframe::App for VimpdfApp {
                 font_size,
             ));
         }
-        match (bottom_rect, self.mode) {
-            (Some(rect), Mode::Command) => match self.cmdline.show(
-                ui,
-                rect,
-                font_size,
-                Some(&|line: &str| {
-                    let base = self.view.path.parent().unwrap_or(std::path::Path::new("/"));
-                    crate::input::complete::complete(line, base)
-                }),
-            ) {
-                Outcome::Editing => {}
-                Outcome::Cancel => self.mode = self.prompt_return,
-                Outcome::Submit(line) => {
-                    self.mode = self.prompt_return;
-                    match parse_ex(&line) {
-                        Ok(Some(cmd)) => ui_commands.push(cmd),
-                        Ok(None) => {}
-                        Err(e) => self.error(e),
-                    }
-                }
-            },
-            (Some(rect), Mode::Search) => match self.searchline.show(ui, rect, font_size, None) {
-                Outcome::Editing => {}
-                Outcome::Cancel => self.mode = self.prompt_return,
-                Outcome::Submit(line) => {
-                    self.mode = self.prompt_return;
-                    ui_commands.push(Command::Search(line));
-                }
-            },
-            (Some(rect), _) => {
-                let mut file = crate::welcome::display_name(&self.view.path);
-                if self.annots.unsaved {
-                    file.push_str(" [+]");
-                }
-                let linewise = self.selection.is_some_and(|s| s.linewise);
-                let status = statusbar::Status {
-                    mode: match (&self.placing, self.mode) {
-                        (_, Mode::Visual) if linewise => "V-LINE",
-                        (Some(pl), Mode::Place) => pl.purpose.label(),
-                        _ => self.mode.label(),
-                    },
-                    file: &file,
-                    page,
-                    pages,
-                    zoom_percent: vp.zoom * 100.0,
-                    pending: self.keys.pending_display(),
-                    search: self.search_status(),
-                    message: match &self.confirm {
-                        Some(c) => Some((c.question.as_str(), false)),
-                        None => self.message.as_ref().map(|m| (m.text.as_str(), m.error)),
-                    },
-                    font_size,
-                };
-                ui_commands.extend(statusbar::show(ui, rect, &status));
-            }
-            (None, _) => {
-                // No status bar: show messages over the page area.
-                if let Some(m) = &self.message {
-                    painter.text(
-                        area.left_bottom() + Vec2::new(8.0, -8.0),
-                        Align2::LEFT_BOTTOM,
-                        &m.text,
-                        FontId::monospace(font_size),
-                        if m.error {
-                            ui::ERROR
-                        } else {
-                            Color32::LIGHT_GRAY
-                        },
-                    );
-                }
-            }
-        }
+        self.show_bottom_bar(ui, window.bottom, area, &vp, &mut ui_commands);
         if self.show_help {
             help::show(
                 &ctx,
@@ -1304,7 +1150,7 @@ impl eframe::App for VimpdfApp {
         if let Some(cmd) = self.show_settings(&ctx) {
             ui_commands.push(cmd);
         }
-        if let Some(rect) = menubar_rect
+        if let Some(rect) = window.menubar
             && let Some(cmd) = self.show_menubar(&ctx, ui, rect)
         {
             ui_commands.push(cmd);
@@ -1317,39 +1163,8 @@ impl eframe::App for VimpdfApp {
         {
             ui_commands.push(cmd);
         }
-        if let Some(rect) = outline_rect {
-            let focused = self.mode == Mode::Outline;
-            if !focused {
-                // Pinned and idle: follow the page being read.
-                let current = self.outline_entry_for(vp.centre_page(&self.view.layout));
-                if current != self.outline.selected {
-                    self.outline.selected = current;
-                    self.outline.follow = true;
-                }
-            }
-            let out = ui::outline::show(
-                &ctx,
-                ui::outline::Panel {
-                    rect,
-                    items: &self.view.outline,
-                    selected: self.outline.selected,
-                    follow: self.outline.follow,
-                    focused,
-                    pinned: self.config.outline_pinned,
-                    font_size,
-                },
-            );
-            self.outline.follow = false;
-            if out.resized != 0.0 {
-                self.config.outline_width = (rect.width() + out.resized).max(OUTLINE_MIN_WIDTH);
-            }
-            if let Some(i) = out.clicked {
-                // Clicking jumps but keeps the panel open, to browse.
-                self.outline.selected = i;
-                if let Some(target) = self.view.outline[i].target.clone() {
-                    ui_commands.push(Command::FollowLink(target));
-                }
-            }
+        if let Some(rect) = window.outline {
+            self.show_outline_panel(&ctx, rect, &vp, &mut ui_commands);
         }
         self.save_state_periodically();
         self.remember_ui_state(&ctx);

@@ -326,14 +326,42 @@ impl VimpdfApp {
         let mut commands = Vec::new();
         let (pointer, modifiers) = ctx.input(|i| (i.pointer.clone(), i.modifiers));
         let hover = pointer.hover_pos().filter(|p| area.contains(*p));
-        let pan_held = match self.config.pan_modifier {
+        let pan_held = self.pan_held(modifiers);
+        self.press_annotation(&pointer, modifiers, pan_held, area);
+        self.start_drag(&pointer, modifiers, pan_held, area);
+        self.update_drag(&pointer, area, &mut commands);
+        self.finish_drag(&pointer, &mut commands);
+
+        // Double / triple click select a word / line; Shift+click extends.
+        let click_pos = pointer.interact_pos().filter(|p| area.contains(*p));
+        if let Some(pos) = click_pos {
+            self.handle_clicks(&pointer, modifiers, area, pos);
+        }
+        if pointer.secondary_clicked()
+            && let Some(pos) = click_pos
+        {
+            self.open_context_menu(ctx, area, pos);
+        }
+        (commands, self.pointer_cursor(area, hover))
+    }
+
+    fn pan_held(&self, modifiers: egui::Modifiers) -> bool {
+        match self.config.pan_modifier {
             Modifier::Alt => modifiers.alt,
             Modifier::Shift => modifiers.shift,
             Modifier::Ctrl => modifiers.ctrl,
             Modifier::Cmd => modifiers.mac_cmd || modifiers.command,
-        };
+        }
+    }
 
-        // Pressing a comment bubble, a note or a text box.
+    /// Pressing a comment bubble, a note or a text box.
+    fn press_annotation(
+        &mut self,
+        pointer: &egui::PointerState,
+        modifiers: egui::Modifiers,
+        pan_held: bool,
+        area: Rect,
+    ) {
         if pointer.primary_pressed()
             && self.drag.is_none()
             && !pan_held
@@ -359,8 +387,15 @@ impl VimpdfApp {
                 });
             }
         }
+    }
 
-        // Start a drag.
+    fn start_drag(
+        &mut self,
+        pointer: &egui::PointerState,
+        modifiers: egui::Modifiers,
+        pan_held: bool,
+        area: Rect,
+    ) {
         if let Some(press) = pointer.press_origin().filter(|p| area.contains(*p))
             && self.drag.is_none()
         {
@@ -375,7 +410,14 @@ impl VimpdfApp {
                 self.drag = Some(Drag::Select { anchor });
             }
         }
+    }
 
+    fn update_drag(
+        &mut self,
+        pointer: &egui::PointerState,
+        area: Rect,
+        commands: &mut Vec<Command>,
+    ) {
         match self.drag {
             Some(Drag::Pan) => {
                 let d = pointer.delta();
@@ -424,7 +466,9 @@ impl VimpdfApp {
             }
             _ => {}
         }
+    }
 
+    fn finish_drag(&mut self, pointer: &egui::PointerState, commands: &mut Vec<Command>) {
         let released = !pointer.any_down();
         if released && let Some(drag) = self.drag.take() {
             match drag {
@@ -447,78 +491,82 @@ impl VimpdfApp {
                 _ => {}
             }
         }
+    }
 
-        // Double / triple click select a word / line; Shift+click extends.
-        let click_pos = pointer.interact_pos().filter(|p| area.contains(*p));
-        if let Some(pos) = click_pos {
-            let text = self.view.doc_text();
-            if pointer.button_triple_clicked(PointerButton::Primary) {
-                if let Some(p) = self.text_pos_at(area, pos)
-                    && let Some((a, b)) = text.line_at(p)
-                {
-                    self.select_range(a, b);
-                }
-            } else if pointer.button_double_clicked(PointerButton::Primary) {
-                if let Some(p) = self.text_pos_at(area, pos) {
-                    let (a, b) = text.word_at(p);
-                    self.select_range(a, b);
-                }
-            } else if pointer.primary_clicked()
-                && modifiers.shift
-                && let Some(p) = self.text_pos_at(area, pos)
+    fn handle_clicks(
+        &mut self,
+        pointer: &egui::PointerState,
+        modifiers: egui::Modifiers,
+        area: Rect,
+        pos: Pos2,
+    ) {
+        let text = self.view.doc_text();
+        if pointer.button_triple_clicked(PointerButton::Primary) {
+            if let Some(p) = self.text_pos_at(area, pos)
+                && let Some((a, b)) = text.line_at(p)
             {
-                match self.selection.as_mut() {
-                    Some(sel) => sel.caret = p,
-                    None => self.selection = Some(Selection::at(p, 0.0)),
-                }
-                self.mode = Mode::Visual;
-            } else if pointer.primary_clicked() && self.mode == Mode::Visual {
-                // A plain click clears the selection.
-                self.exit_visual();
+                self.select_range(a, b);
             }
-        }
-
-        if pointer.secondary_clicked()
-            && let Some(pos) = click_pos
+        } else if pointer.button_double_clicked(PointerButton::Primary) {
+            if let Some(p) = self.text_pos_at(area, pos) {
+                let (a, b) = text.word_at(p);
+                self.select_range(a, b);
+            }
+        } else if pointer.primary_clicked()
+            && modifiers.shift
+            && let Some(p) = self.text_pos_at(area, pos)
         {
-            let link = self.viewport.as_ref().and_then(|vp| {
-                mouse::link_at(
-                    pos - area.min.to_vec2(),
-                    vp,
-                    &self.view.layout,
-                    &self.view.links,
-                )
-                .map(|l| l.target.clone())
-            });
-            let annot = self
-                .bubble_at(area, pos)
-                .or_else(|| self.annot_at(area, pos))
-                .map(|a| (a.page, a.xref, a.kind, !a.contents.is_empty()));
-            let at = self.page_point(area, pos);
-            self.menu = Some(ContextMenu {
-                pos,
-                link,
-                annot,
-                at,
-                opened: ctx.cumulative_pass_nr(),
-            });
+            match self.selection.as_mut() {
+                Some(sel) => sel.caret = p,
+                None => self.selection = Some(Selection::at(p, 0.0)),
+            }
+            self.mode = Mode::Visual;
+        } else if pointer.primary_clicked() && self.mode == Mode::Visual {
+            // A plain click clears the selection.
+            self.exit_visual();
         }
+    }
 
+    fn open_context_menu(&mut self, ctx: &egui::Context, area: Rect, pos: Pos2) {
+        let link = self.viewport.as_ref().and_then(|vp| {
+            mouse::link_at(
+                pos - area.min.to_vec2(),
+                vp,
+                &self.view.layout,
+                &self.view.links,
+            )
+            .map(|l| l.target.clone())
+        });
+        let annot = self
+            .bubble_at(area, pos)
+            .or_else(|| self.annot_at(area, pos))
+            .map(|a| (a.page, a.xref, a.kind, !a.contents.is_empty()));
+        let at = self.page_point(area, pos);
+        self.menu = Some(ContextMenu {
+            pos,
+            link,
+            annot,
+            at,
+            opened: ctx.cumulative_pass_nr(),
+        });
+    }
+
+    /// The cursor for what the pointer is doing or is over, if text-related.
+    fn pointer_cursor(&self, area: Rect, hover: Option<Pos2>) -> Option<CursorIcon> {
         let over_box = |p: Pos2| {
             self.bubble_at(area, p).is_some()
                 || self
                     .annot_at(area, p)
                     .is_some_and(|a| matches!(a.kind, AnnotKind::Note | AnnotKind::Text))
         };
-        let cursor = match self.drag {
+        match self.drag {
             Some(Drag::Pan) | Some(Drag::Annot { moved: true, .. }) => Some(CursorIcon::Grabbing),
             Some(Drag::Annot { .. }) | Some(Drag::Bubble { .. }) => Some(CursorIcon::PointingHand),
             Some(Drag::Select { .. }) => Some(CursorIcon::Text),
             None if hover.is_some_and(over_box) => Some(CursorIcon::PointingHand),
             None if hover.is_some_and(|p| self.over_text(area, p)) => Some(CursorIcon::Text),
             None => None,
-        };
-        (commands, cursor)
+        }
     }
 
     /// A point of the page area as (page, x, y) in page coordinates.

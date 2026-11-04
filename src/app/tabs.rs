@@ -192,14 +192,38 @@ impl VimpdfApp {
             }
             Err(e) => {
                 self.error(format!("{e:#}"));
-                self.tabs.slots.remove(i);
-                if i < self.tabs.active {
-                    self.tabs.active -= 1;
-                }
-                self.save_session();
+                self.forget_unopened_tab(i);
                 None
             }
         }
+    }
+
+    /// Take tab `i` out of the row, if it was never opened.
+    pub(super) fn forget_unopened_tab(&mut self, i: usize) -> bool {
+        if !matches!(self.tabs.slots.get(i), Some(Slot::Unopened(_))) {
+            return false;
+        }
+        self.tabs.slots.remove(i);
+        if i < self.tabs.active {
+            self.tabs.active -= 1;
+        }
+        self.save_session();
+        true
+    }
+
+    /// Take tab `i` out of the row if it was never opened and its file is
+    /// gone, with a message.
+    pub(super) fn forget_missing_tab(&mut self, i: usize) -> bool {
+        let Some(Slot::Unopened(path)) = self.tabs.slots.get(i) else {
+            return false;
+        };
+        if path.is_file() {
+            return false;
+        }
+        let message = format!("{} no longer exists", path.display());
+        self.forget_unopened_tab(i);
+        self.error(message);
+        true
     }
 
     /// Switch to tab `i` (0-based).

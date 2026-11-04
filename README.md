@@ -217,8 +217,9 @@ Each document opens in a tab; the tab bar at the top shows them numbered
 click. Each tab keeps its own position, selection, search, jumps and
 annotations. Opening a file that is already open switches to its tab.
 
-The tabs open when vimpdf quits reopen at the next launch, each where you
-left it (a file you open vimpdf with gets a tab too, and is shown).
+The tabs open when vimpdf quits come back at the next launch, each where you
+left it (a file you open vimpdf with gets a tab too, and is shown). Only the
+tab on show opens right away; the others open when you first go to them.
 `ui.restore_tabs = false` starts with just that file.
 
 A tab can move to a window of its own: `:detach`, or right-click the tab →
