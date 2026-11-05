@@ -605,6 +605,8 @@ impl VimpdfApp {
             .map(|(k, c)| (*k, [c.0[0], c.0[1], c.0[2]]))
             .collect();
         let mut chosen = None;
+        // The colour lists are popups of their own, outside the menu's area.
+        let mut submenus = Vec::new();
         let response = egui::Area::new(egui::Id::unique("vimpdf-context-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(menu.pos)
@@ -626,6 +628,7 @@ impl VimpdfApp {
                     }
                     if has_selection {
                         ui.menu_button("Highlight", |ui| {
+                            submenus.push(ui.layer_id());
                             for (letter, [r, g, b]) in &palette {
                                 let label =
                                     egui::RichText::new(format!("■ colour {letter}\ta{letter}"))
@@ -685,6 +688,7 @@ impl VimpdfApp {
                             AnnotKind::Highlight | AnnotKind::Note | AnnotKind::Text
                         ) {
                             ui.menu_button("Change colour", |ui| {
+                                submenus.push(ui.layer_id());
                                 for (letter, [r, g, b]) in &palette {
                                     let label = egui::RichText::new(format!(
                                         "■ colour {letter}\t<C-a> c{letter}"
@@ -729,12 +733,113 @@ impl VimpdfApp {
                 });
             })
             .response;
-        let clicked_elsewhere =
-            !just_opened && ctx.input(|i| i.pointer.any_pressed()) && !response.contains_pointer();
+        // On the press, not the release: closing now for a press on a colour
+        // would take the button away before its click.
+        let clicked_elsewhere = !just_opened
+            && ctx.input(|i| i.pointer.any_pressed())
+            && !pointer_on_menu(ctx, response.layer_id, &submenus);
         let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         if chosen.is_some() || clicked_elsewhere || escape {
             self.menu = None;
         }
         chosen
+    }
+}
+
+/// Is the pointer on the menu or on one of its submenus?
+fn pointer_on_menu(ctx: &egui::Context, menu: egui::LayerId, submenus: &[egui::LayerId]) -> bool {
+    ctx.pointer_interact_pos()
+        .and_then(|pos| ctx.layer_id_at(pos))
+        .is_some_and(|layer| layer == menu || submenus.contains(&layer))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What a frame of a menu with a submenu showed.
+    struct Shown {
+        opener: Rect,
+        colour: Option<Rect>,
+        colour_clicked: bool,
+        on_menu: bool,
+        in_main_area: bool,
+    }
+
+    fn frame(ctx: &egui::Context, pos: Pos2, press: Option<bool>) -> Shown {
+        let mut events = vec![egui::Event::PointerMoved(pos)];
+        events.extend(press.map(|pressed| egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }));
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events,
+            ..Default::default()
+        };
+        let mut shown = Shown {
+            opener: Rect::NOTHING,
+            colour: None,
+            colour_clicked: false,
+            on_menu: false,
+            in_main_area: false,
+        };
+        ctx.run_pass(input, |ctx| {
+            let mut submenus = Vec::new();
+            let response = egui::Area::new(egui::Id::unique("menu"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(egui::pos2(100.0, 100.0))
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        let opener = ui.menu_button("Highlight", |ui| {
+                            submenus.push(ui.layer_id());
+                            let colour = ui.button("colour");
+                            shown.colour = Some(colour.rect);
+                            shown.colour_clicked = colour.clicked();
+                        });
+                        shown.opener = opener.response.rect;
+                    });
+                })
+                .response;
+            shown.on_menu = pointer_on_menu(ctx, response.layer_id, &submenus);
+            shown.in_main_area = response.contains_pointer();
+        })
+        .textures_delta
+        .clear();
+        shown
+    }
+
+    #[test]
+    fn a_press_on_a_submenu_is_on_the_menu() {
+        let ctx = egui::Context::default();
+        let away = egui::pos2(700.0, 500.0);
+        for _ in 0..3 {
+            frame(&ctx, away, None);
+        }
+        let opener = frame(&ctx, away, None).opener.center();
+        frame(&ctx, opener, None);
+        frame(&ctx, opener, None);
+        frame(&ctx, opener, Some(true));
+        frame(&ctx, opener, Some(false));
+        let colour = (0..3)
+            .map(|_| frame(&ctx, opener, None).colour)
+            .next_back()
+            .flatten()
+            .expect("the submenu is open")
+            .center();
+        frame(&ctx, colour, None);
+        frame(&ctx, colour, None);
+
+        let press = frame(&ctx, colour, Some(true));
+        assert!(!press.in_main_area, "the submenu is outside the area");
+        assert!(press.on_menu);
+        assert!(frame(&ctx, colour, Some(false)).colour_clicked);
+
+        for _ in 0..3 {
+            frame(&ctx, away, None);
+        }
+        assert!(!frame(&ctx, away, Some(true)).on_menu, "a click elsewhere");
     }
 }
