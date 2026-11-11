@@ -119,6 +119,7 @@ a locally built app. `scripts/make-icon.sh` regenerates the icon.
 ```fish
 vimpdf paper.pdf
 vimpdf *.pdf                           # several files, one tab each
+vimpdf --join *.pdf                    # several files as one document, in one tab
 vimpdf --config other.toml paper.pdf   # use a different config file
 vimpdf                                  # start page with recent files
 vimpdf --new-window paper.pdf           # a separate window, not a tab
@@ -127,6 +128,12 @@ vimpdf --new-window paper.pdf           # a separate window, not a tab
 Only one vimpdf runs per user: `vimpdf paper.pdf` while it's running opens
 the file in a new tab there (on Linux and macOS alike) and exits. With
 `ui.single_instance = false` every file opens in its own window instead.
+
+`--join` (`-j`) copies the files' pages, in order, into one combined PDF in the
+temporary folder and opens that. Its outline has an entry for each file, with
+the file's own outline under it; links and annotations come along. Being a
+temporary file, your highlights in it are kept with `:saveas` (`:w` refuses);
+the original files are never changed.
 
 Key notation follows vim: `<C-d>` is Ctrl+d, `<C-F>` is Ctrl+Shift+f,
 `<S-Space>` is Shift+Space. Counts work as in vim: `5j`, `3J`, `12G`, `3+`.

@@ -3,6 +3,7 @@ mod app;
 mod config;
 mod document;
 mod input;
+mod join;
 mod jumplist;
 mod layout;
 mod links;
@@ -48,6 +49,10 @@ struct Args {
     #[arg(long)]
     new_window: bool,
 
+    /// Show all the files in one tab, one after another, as a single
+    /// document (a combined copy in the temporary folder; `:saveas` keeps it).
+    #[arg(short, long)]
+    join: bool,
 }
 
 fn main() -> ExitCode {
@@ -86,6 +91,11 @@ fn run(args: Args) -> Result<()> {
             Ok(path)
         })
         .collect::<Result<Vec<_>>>()?;
+    let files = if args.join && files.len() > 1 {
+        vec![join::join(&files)?]
+    } else {
+        files
+    };
     let initial = match files.first() {
         Some(path) => Some((path.clone(), DocInfo::load(path)?)),
         None => None,
