@@ -10,7 +10,18 @@ anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 crossbeam-channel = "0.5"
 directories = "6.0.0"
-eframe = "0.37.0"
+# Default features minus `links` (URLs are opened by links.rs) and
+# `web_screen_reader` (web builds only). winit's defaults come from our own
+# winit dependency below.
+eframe = { version = "0.37.0", default-features = false, features = [
+    "accesskit",
+    "clipboard",
+    "default_fonts",
+    "system_fonts",
+    "wayland",
+    "wgpu",
+    "x11",
+] }
 mupdf = "0.8.0"
 notify = "8"
 toml = "1.1.8"
@@ -29,3 +40,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 # doesn't compile (feature unification).
 [target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]
 font-kit = { version = "0.14", default-features = false, features = ["source-fontconfig-dlopen"] }
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

@@ -5,7 +5,7 @@ scientific papers. Everything works from the keyboard; the mouse works too
 when you want it. Rendering is done by [MuPDF](https://mupdf.com/); the window
 and UI use [egui/eframe](https://github.com/emilk/egui).
 
-Status: in development — see [PLAN.md](PLAN.md) for the roadmap. Done so far:
+Status: in development — see [PLAN.md](PLAN.md) for what is planned next. Done so far:
 continuous scrolling, vim motions with counts, links, zoom and fit modes,
 status bar, `:` command line, config file, toolbar, help overlay, search,
 link hints, jumplist and marks, text selection with vim visual mode and the
