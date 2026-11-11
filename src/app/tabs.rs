@@ -520,7 +520,7 @@ pub(super) fn is_main_window() -> bool {
 
 fn send_to_main_window(path: &std::path::Path) -> bool {
     #[cfg(unix)]
-    return crate::platform::instance::forward(path);
+    return crate::platform::instance::forward(&[path.to_owned()]);
     #[cfg(not(unix))]
     {
         let _ = path;

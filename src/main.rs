@@ -35,10 +35,10 @@ use crate::document::DocInfo;
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
-    /// PDF file to open (without one, vimpdf waits for a file from the system,
-    /// e.g. Finder's Open With, or shows the start page with recent files).
-    /// If vimpdf is already running, the file opens there in a new tab.
-    file: Option<PathBuf>,
+    /// PDF files to open, each in a tab (without one, vimpdf waits for a file
+    /// from the system, e.g. Finder's Open With, or shows the start page with
+    /// recent files). If vimpdf is already running, they open there in tabs.
+    files: Vec<PathBuf>,
 
     /// Config file to use instead of ~/.config/vimpdf/config.toml.
     #[arg(long, value_name = "PATH")]
@@ -47,6 +47,7 @@ struct Args {
     /// Open a separate window, instead of a tab in the running vimpdf.
     #[arg(long)]
     new_window: bool,
+
 }
 
 fn main() -> ExitCode {
@@ -70,18 +71,23 @@ fn run(args: Args) -> Result<()> {
     // Working copies from sessions that didn't quit cleanly.
     annotate::remove_stale_work_dirs(std::time::Duration::from_secs(24 * 3600));
 
-    // A file given on the command line is checked before any window opens,
-    // so mistakes are reported in the terminal.
-    let initial = match &args.file {
-        Some(file) => {
+    // Files given on the command line are checked before any window opens,
+    // so mistakes are reported in the terminal. The first is loaded now, the
+    // others open in tabs once the window is up.
+    let files = args
+        .files
+        .iter()
+        .map(|file| {
             let path = std::fs::canonicalize(file)
                 .with_context(|| format!("cannot open '{}'", file.display()))?;
             if !path.is_file() {
                 bail!("'{}' is not a file", path.display());
             }
-            let info = DocInfo::load(&path)?;
-            Some((path, info))
-        }
+            Ok(path)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let initial = match files.first() {
+        Some(path) => Some((path.clone(), DocInfo::load(path)?)),
         None => None,
     };
 
@@ -91,14 +97,14 @@ fn run(args: Args) -> Result<()> {
         None => (Config::default(), Vec::new()),
     };
 
-    // Hand the file to a running vimpdf, which opens it in a tab. Listen
+    // Hand the files to a running vimpdf, which opens them in tabs. Listen
     // even without `ui.single_instance`, so other windows can `:attach`.
     #[cfg(unix)]
     {
-        if let Some((path, _)) = &initial
+        if !files.is_empty()
             && !args.new_window
             && config.single_instance
-            && platform::instance::forward(path)
+            && platform::instance::forward(&files)
         {
             return Ok(());
         }
@@ -133,6 +139,7 @@ fn run(args: Args) -> Result<()> {
         .build()
         .context("cannot create the event loop")?;
     platform::install_open_handler();
+    platform::push_opened(files.into_iter().skip(1));
 
     let creator: eframe::AppCreator<'_> = Box::new(move |cc| {
         let ctx = cc.egui_ctx.clone();

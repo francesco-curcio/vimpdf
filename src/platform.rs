@@ -79,7 +79,7 @@ pub fn activate() {}
 pub mod instance {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::{UnixListener, UnixStream};
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     /// This process bound the socket (and removes it on quit).
@@ -90,14 +90,17 @@ pub mod instance {
         super::private_temp_dir().join(format!("vimpdf-{user}.sock"))
     }
 
-    /// Send `path` to a running vimpdf. False if none is running.
-    pub fn forward(path: &Path) -> bool {
+    /// Send `paths` to a running vimpdf. False if none is running.
+    pub fn forward(paths: &[PathBuf]) -> bool {
         let Ok(mut stream) = UnixStream::connect(socket_path()) else {
             return false;
         };
-        let mut line = path.as_os_str().as_encoded_bytes().to_vec();
-        line.push(b'\n');
-        stream.write_all(&line).is_ok()
+        let mut lines = Vec::new();
+        for path in paths {
+            lines.extend_from_slice(path.as_os_str().as_encoded_bytes());
+            lines.push(b'\n');
+        }
+        stream.write_all(&lines).is_ok()
     }
 
     /// Accept files from later launches, unless another vimpdf already does

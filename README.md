@@ -118,6 +118,7 @@ a locally built app. `scripts/make-icon.sh` regenerates the icon.
 
 ```fish
 vimpdf paper.pdf
+vimpdf *.pdf                           # several files, one tab each
 vimpdf --config other.toml paper.pdf   # use a different config file
 vimpdf                                  # start page with recent files
 vimpdf --new-window paper.pdf           # a separate window, not a tab
