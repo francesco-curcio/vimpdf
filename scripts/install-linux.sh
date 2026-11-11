@@ -8,6 +8,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# rustup puts cargo in ~/.cargo/bin, which isn't always on the PATH.
+if ! command -v cargo >/dev/null; then
+    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    command -v cargo >/dev/null || { echo "cargo not found (install Rust with rustup)" >&2; exit 1; }
+fi
+
 cargo build --release
 
 bin_dir="$HOME/.local/bin"
